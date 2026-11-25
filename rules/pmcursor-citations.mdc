@@ -1,0 +1,19 @@
+---
+description: Enforce 100% verified file:line citations, AST contract grounding, and gstack-style test cards in PRDs, specs, and ADRs.
+alwaysApply: true
+globs:
+  - "**/*.md"
+  - "src/**/*.py"
+  - "indexer/**/*.py"
+  - "api/**/*.py"
+  - "evals/**/*.py"
+---
+
+# PMCursor Grounding & Spec-Drift Rules
+
+1. **Zero Fabricated Citations:** Never cite a file path, symbol, or line number in a PRD, spec, or ticket without verifying it first via `pmcursor index` or reading the file directly. Format citations as `path/to/file.py:line`.
+2. **Contract-First Verification:** Before editing or approving a PRD (`docs/**/*.md`, `PROJECT_SPEC.md`), run `pmcursor drift --prd <path> --repo .` to detect schema mismatches across Pydantic models, FastAPI routes, and ADRs.
+3. **Acceptance Criteria Cards (`gstack` standard):** Every acceptance test in a spec must state its verification card:
+   `protects=<observable behavior>; fails_when=<broken condition>; no_claim=<what passing does not prove>`.
+4. **ADR Discipline:** Record every non-trivial architectural or product-contract decision in `docs/adr/` using `docs/adr/000-template.md`.
+5. **Completion Protocol:** Report workflow completion using `DONE`, `DONE_WITH_CONCERNS`, `BLOCKED`, or `NEEDS_CONTEXT` with exact command output evidence.

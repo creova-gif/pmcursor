@@ -1,0 +1,24 @@
+name: CI
+on: [push, pull_request]
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    env:
+      PYTHONPATH: src:.
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install dependencies
+        run: pip install pytest ruff mypy pydantic
+      - name: Lint
+        run: ruff check src indexer api web evals tests
+      - name: Type check
+        run: mypy --strict src indexer api web evals tests
+      - name: Test
+        run: pytest
+      - name: Validate plugin
+        run: python -m pmcursor.cli validate-plugin --repo .
+      - name: Run eval
+        run: python -m pmcursor.cli eval --json

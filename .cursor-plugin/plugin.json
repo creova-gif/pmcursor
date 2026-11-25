@@ -1,0 +1,32 @@
+{
+  "name": "pmcursor",
+  "displayName": "PMCursor",
+  "version": "0.1.0",
+  "description": "Codebase-aware AI workflow plugin for Product Managers. Combines AST contract indexing and spec-drift verification with gstack-style office-hours, spec authoring, and ship-readiness skills.",
+  "author": {
+    "name": "Justin Mafie"
+  },
+  "homepage": "https://github.com/justinmafie/pmcursor",
+  "repository": "https://github.com/justinmafie/pmcursor",
+  "license": "MIT",
+  "keywords": [
+    "pmcursor",
+    "product-management",
+    "prd",
+    "spec-drift",
+    "ast-indexer",
+    "gstack",
+    "verification"
+  ],
+  "category": "developer-tools",
+  "tags": [
+    "product-management",
+    "specs",
+    "architecture",
+    "code-contracts",
+    "drift-detection"
+  ],
+  "skills": "./skills/",
+  "agents": "./agents/",
+  "rules": "./rules/"
+}
