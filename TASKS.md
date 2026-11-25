@@ -14,7 +14,7 @@
 
 ## Wave 3: Launch and design partner validation
 - [x] Publish clean `README.md` with reproducible benchmark numbers and `cursor/plugins` plus `gstack` architecture mapping
-- [ ] Run first external design-partner or open-source release
+- [x] Run first external design-partner or open-source release (`https://github.com/creova-gif/pmcursor`)
 
 ## Scope expansion (T1 to T6)
 - [x] **T1 (`SEC-1`)**: Enforce `repo_root` path containment, `(OSError, UnicodeDecodeError)` rescue, and `2MB` file cap in `src/pmcursor/indexer.py` and `src/pmcursor/drift.py`
