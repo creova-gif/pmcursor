@@ -83,7 +83,7 @@ PMCursor adapts plugin packaging and CLI conventions from [`cursor/plugins`](htt
 	```bash
 	PYTHONPATH=src python3 -m pmcursor.cli release-notes --prd PROJECT_SPEC.md --repo . --base main --version v0.1.0
 	```
-12. Start the MCP server for Cursor/Claude MCP integration (configured via [.mcp.json](.mcp.json)).
+12. Start the MCP server for Cursor/Claude MCP integration (configured via [.mcp.json](.mcp.json)), exposing 7 tools (`pmcursor_index`, `pmcursor_drift`, `pmcursor_checklist`, `pmcursor_ticket_sync`, `pmcursor_release_notes`, `pmcursor_flags`, `pmcursor_telemetry_verify`).
 	```bash
 	PYTHONPATH=src python3 -m pmcursor.cli mcp
 	```
@@ -102,6 +102,10 @@ PMCursor adapts plugin packaging and CLI conventions from [`cursor/plugins`](htt
 16. Compute an organization alignment summary across contracts, feature flags, drift, scope coverage, and edge-case checklists.
 	```bash
 	PYTHONPATH=src python3 -m pmcursor.cli dashboard --repo . --prd PROJECT_SPEC.md
+	```
+17. Run environment, plugin, and configuration diagnostics.
+	```bash
+	PYTHONPATH=src python3 -m pmcursor.cli doctor --repo .
 	```
 
 ## FastAPI Server & GitHub Action
@@ -124,6 +128,7 @@ pip install 'pmcursor[server]'
 
 - `GET /health`
 - `GET /readyz` (readiness probe with cached repo count)
+- `GET /metrics` (Prometheus-format request and repo cache metrics)
 - `POST /v1/drift/audit`
 - `POST /v1/webhooks/github`
 - `POST /v1/webhooks/linear` (`Linear-Signature` HMAC-SHA256, `PMCURSOR_LINEAR_WEBHOOK_SECRET`)
