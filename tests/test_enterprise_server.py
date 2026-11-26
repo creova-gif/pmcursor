@@ -10,7 +10,7 @@ from typing import Any
 import pytest
 from fastapi.testclient import TestClient
 
-from api.server import MAX_WEBHOOK_BYTES, create_app
+from api.server import MAX_REQUEST_BYTES, MAX_WEBHOOK_BYTES, create_app
 from pmcursor.indexer import index_repository
 from pmcursor.mcp_server import RepoIndexCache
 from pmcursor.models import RepoMap
@@ -137,7 +137,7 @@ def test_oversized_webhook_payload_returns_413(endpoint: str) -> None:
         headers={"Content-Type": "application/json"},
     )
     assert resp.status_code == 413
-    assert resp.json()["detail"] == "Webhook payload exceeds 2MB limit"
+    assert resp.json()["detail"] == "Request payload exceeds 2MB limit"
 
     header_oversized_resp = client.post(
         endpoint,
@@ -148,3 +148,76 @@ def test_oversized_webhook_payload_returns_413(endpoint: str) -> None:
         },
     )
     assert header_oversized_resp.status_code == 413
+    assert header_oversized_resp.json()["detail"] == "Request payload exceeds 2MB limit"
+
+
+def test_oversized_content_length_returns_413_on_drift_audit(tmp_path: Path) -> None:
+    _create_sample_repo(tmp_path)
+    app = create_app()
+    client = TestClient(app)
+
+    resp = client.post(
+        "/v1/drift/audit",
+        content=b"{}",
+        headers={
+            "Content-Type": "application/json",
+            "Content-Length": str(MAX_REQUEST_BYTES + 1),
+            "X-Request-ID": "req-oversized-1",
+        },
+    )
+    assert resp.status_code == 413
+    assert resp.json()["detail"] == "Request payload exceeds 2MB limit"
+    assert resp.headers.get("X-Request-ID") == "req-oversized-1"
+    assert resp.headers.get("X-Process-Time-Ms") is not None
+
+    neg_resp = client.post(
+        "/v1/drift/audit",
+        content=b"{}",
+        headers={
+            "Content-Type": "application/json",
+            "Content-Length": "-1",
+        },
+    )
+    assert neg_resp.status_code == 413
+    assert neg_resp.json()["detail"] == "Request payload exceeds 2MB limit"
+
+
+def test_prometheus_metrics_endpoint(tmp_path: Path) -> None:
+    repo = _create_sample_repo(tmp_path)
+    cache = RepoIndexCache()
+    app = create_app(repo_cache=cache)
+    client = TestClient(app)
+
+    assert client.get("/health").status_code == 200
+    assert (
+        client.post(
+            "/v1/drift/audit",
+            json={
+                "repo_root": str(repo),
+                "prd_markdown": "# PRD\n\n- User model\n",
+                "prd_path": "PRD.md",
+            },
+        ).status_code
+        == 200
+    )
+    assert (
+        client.post(
+            "/v1/drift/audit",
+            content=b"{}",
+            headers={
+                "Content-Type": "application/json",
+                "Content-Length": str(MAX_REQUEST_BYTES + 1),
+            },
+        ).status_code
+        == 413
+    )
+
+    metrics_resp = client.get("/metrics")
+    assert metrics_resp.status_code == 200
+    assert metrics_resp.headers["content-type"].startswith("text/plain")
+    body = metrics_resp.text
+    assert "pmcursor_http_requests_total 3" in body
+    assert "pmcursor_http_errors_total 1" in body
+    assert "pmcursor_repo_cache_entries 1" in body
+    assert "pmcursor_repo_cache_hits_total" in body
+    assert "pmcursor_repo_cache_misses_total" in body

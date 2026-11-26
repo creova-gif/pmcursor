@@ -3,14 +3,17 @@ from __future__ import annotations
 import json
 import os
 import sys
+from collections import OrderedDict
 from pathlib import Path
 from typing import Any, TextIO
 
 from pmcursor.checklists import generate_edge_case_checklist
 from pmcursor.drift import check_spec_drift
+from pmcursor.feature_flags import audit_feature_flags_and_rollout
 from pmcursor.indexer import index_repository
 from pmcursor.models import RepoMap
 from pmcursor.release_notes import generate_release_notes_and_coverage
+from pmcursor.telemetry_verify import verify_telemetry_samples
 from pmcursor.tickets import TicketProvider, audit_ticket_against_repo
 
 MCP_PROTOCOL_VERSION = "2024-11-05"
@@ -162,6 +165,47 @@ _TOOL_DEFINITIONS: list[dict[str, Any]] = [
             "required": ["repo_root", "prd_markdown", "diff_text"],
         },
     },
+    {
+        "name": "pmcursor_flags",
+        "description": (
+            "Audit PRD feature-flag declarations and rollout/rollback readiness against a repository."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "prd_markdown": {
+                    "type": "string",
+                    "description": "PRD markdown content to audit for feature flags.",
+                },
+                "repo_root": {
+                    "type": "string",
+                    "description": "Path to the repository root directory (default: '.').",
+                },
+            },
+            "required": ["prd_markdown"],
+        },
+    },
+    {
+        "name": "pmcursor_telemetry_verify",
+        "description": (
+            "Verify observed runtime telemetry event samples against indexed TelemetryContract definitions."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "events": {
+                    "type": "array",
+                    "items": {"type": "object"},
+                    "description": "Observed telemetry event samples with event_name and properties.",
+                },
+                "repo_root": {
+                    "type": "string",
+                    "description": "Path to the repository root directory (default: '.').",
+                },
+            },
+            "required": ["events"],
+        },
+    },
 ]
 
 _TOOL_REQUIRED_ARGS: dict[str, tuple[str, ...]] = {
@@ -170,6 +214,8 @@ _TOOL_REQUIRED_ARGS: dict[str, tuple[str, ...]] = {
     "pmcursor_checklist": ("repo_root",),
     "pmcursor_ticket_sync": ("repo_root", "ticket_id", "title", "description"),
     "pmcursor_release_notes": ("repo_root", "prd_markdown", "diff_text"),
+    "pmcursor_flags": ("prd_markdown",),
+    "pmcursor_telemetry_verify": ("events",),
 }
 
 
@@ -209,15 +255,35 @@ def _optional_str_arg(arguments: dict[str, Any], key: str) -> str | None:
 
 
 class RepoIndexCache:
-    """In-memory RepoMap cache keyed by resolved repository path and file fingerprint."""
+    """Bounded LRU in-memory RepoMap cache keyed by resolved path and file fingerprint."""
 
-    def __init__(self) -> None:
-        self._entries: dict[Path, tuple[RepoFingerprint, RepoMap]] = {}
+    def __init__(self, *, max_entries: int = 64) -> None:
+        if max_entries < 1:
+            raise ValueError("max_entries must be >= 1")
+        self._max_entries = max_entries
+        self._entries: OrderedDict[Path, tuple[RepoFingerprint, RepoMap]] = OrderedDict()
+        self._hits = 0
+        self._misses = 0
+
+    @property
+    def max_entries(self) -> int:
+        """Return the maximum number of cached repository entries."""
+        return self._max_entries
 
     @property
     def size(self) -> int:
         """Return the number of cached repository entries."""
         return len(self._entries)
+
+    @property
+    def hits(self) -> int:
+        """Return the number of cache hits."""
+        return self._hits
+
+    @property
+    def misses(self) -> int:
+        """Return the number of cache misses."""
+        return self._misses
 
     def clear(self) -> None:
         """Remove all cached repository entries."""
@@ -251,10 +317,16 @@ class RepoIndexCache:
         fingerprint = self._compute_fingerprint(resolved_root)
         cached = self._entries.get(resolved_root)
         if cached is not None and cached[0] == fingerprint:
+            self._entries.move_to_end(resolved_root)
+            self._hits += 1
             return cached[1]
 
+        self._misses += 1
         repo_map = index_repository(resolved_root)
         self._entries[resolved_root] = (fingerprint, repo_map)
+        self._entries.move_to_end(resolved_root)
+        while len(self._entries) > self.max_entries:
+            self._entries.popitem(last=False)
         return repo_map
 
 
@@ -290,8 +362,20 @@ class PMCursorMCPServer:
         return resolved
 
     def _dispatch_tool(self, tool_name: str, arguments: dict[str, Any]) -> dict[str, Any]:
-        raw_repo_root = _require_str_arg(arguments, "repo_root")
+        if tool_name in {"pmcursor_flags", "pmcursor_telemetry_verify"}:
+            raw_repo_root = _optional_str_arg(arguments, "repo_root")
+            if raw_repo_root is None:
+                raw_repo_root = "."
+        else:
+            raw_repo_root = _require_str_arg(arguments, "repo_root")
+
         resolved_root = self._resolve_repo(raw_repo_root)
+
+        if tool_name == "pmcursor_flags":
+            prd_markdown = _require_str_arg(arguments, "prd_markdown")
+            flag_report = audit_feature_flags_and_rollout(prd_markdown, resolved_root)
+            return flag_report.model_dump(mode="json")
+
         repo_map = self._cache.get_or_index(resolved_root)
 
         if tool_name == "pmcursor_index":
@@ -354,6 +438,15 @@ class PMCursorMCPServer:
                 repo_root=resolved_root,
             )
             return release_report.model_dump(mode="json")
+
+        if tool_name == "pmcursor_telemetry_verify":
+            raw_events = arguments.get("events")
+            if not isinstance(raw_events, list) or not all(
+                isinstance(item, dict) for item in raw_events
+            ):
+                raise TypeError("Argument 'events' must be a list of objects")
+            telemetry_report = verify_telemetry_samples(repo_map, raw_events)
+            return telemetry_report.model_dump(mode="json")
 
         raise ValueError(f"Unknown tool: {tool_name}")
 

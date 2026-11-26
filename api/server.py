@@ -13,7 +13,7 @@ from typing import TYPE_CHECKING, Any
 from urllib.parse import parse_qs
 
 from fastapi import FastAPI, Header, HTTPException, Response
-from fastapi.responses import HTMLResponse
+from fastapi.responses import HTMLResponse, JSONResponse, PlainTextResponse
 from pydantic import ValidationError
 
 from api import (
@@ -61,7 +61,8 @@ if TYPE_CHECKING:
 else:
     from fastapi import Request as WebhookRequest
 
-MAX_WEBHOOK_BYTES = 2 * 1024 * 1024  # 2_097_152 bytes
+MAX_REQUEST_BYTES = 2 * 1024 * 1024  # 2_097_152 bytes
+MAX_WEBHOOK_BYTES = MAX_REQUEST_BYTES
 
 logger = logging.getLogger(__name__)
 
@@ -187,16 +188,47 @@ def create_app(
     """Create and configure the PMCursor FastAPI application."""
     fastapi_app = FastAPI(title="PMCursor API")
     cache = repo_cache if repo_cache is not None else RepoIndexCache()
+    total_requests = 0
+    error_requests = 0
 
     @fastapi_app.middleware("http")
     async def request_context_middleware(
         request: WebhookRequest,
         call_next: Callable[[WebhookRequest], Awaitable[Response]],
     ) -> Response:
+        nonlocal total_requests, error_requests
         incoming_id = request.headers.get("x-request-id", "").strip()
         request_id = incoming_id or str(uuid.uuid4())
         start = time.perf_counter()
-        response = await call_next(request)
+
+        payload_too_large = False
+        raw_content_length = request.headers.get("content-length")
+        if raw_content_length is not None:
+            try:
+                content_length = int(raw_content_length)
+            except ValueError:
+                content_length = None
+            if content_length is not None and (
+                content_length < 0 or content_length > MAX_REQUEST_BYTES
+            ):
+                payload_too_large = True
+
+        if not payload_too_large:
+            body = await request.body()
+            if len(body) > MAX_REQUEST_BYTES:
+                payload_too_large = True
+
+        if payload_too_large:
+            response: Response = JSONResponse(
+                status_code=413,
+                content={"detail": "Request payload exceeds 2MB limit"},
+            )
+        else:
+            response = await call_next(request)
+
+        total_requests += 1
+        if response.status_code >= 400:
+            error_requests += 1
         duration_ms = round((time.perf_counter() - start) * 1000.0, 2)
         response.headers["X-Request-ID"] = request_id
         response.headers["X-Process-Time-Ms"] = f"{duration_ms:.2f}"
@@ -220,6 +252,32 @@ def create_app(
     @fastapi_app.get("/readyz")
     def readyz() -> dict[str, Any]:
         return {"status": "ready", "cached_repos": cache.size}
+
+    @fastapi_app.get("/metrics", response_class=PlainTextResponse)
+    def metrics() -> PlainTextResponse:
+        cache_hits = int(getattr(cache, "hits", 0))
+        cache_misses = int(getattr(cache, "misses", 0))
+        lines = [
+            "# HELP pmcursor_http_requests_total Total HTTP requests processed.",
+            "# TYPE pmcursor_http_requests_total counter",
+            f"pmcursor_http_requests_total {total_requests}",
+            "# HELP pmcursor_http_errors_total Total HTTP error responses (status >= 400).",
+            "# TYPE pmcursor_http_errors_total counter",
+            f"pmcursor_http_errors_total {error_requests}",
+            "# HELP pmcursor_repo_cache_entries Number of cached repository maps.",
+            "# TYPE pmcursor_repo_cache_entries gauge",
+            f"pmcursor_repo_cache_entries {cache.size}",
+            "# HELP pmcursor_repo_cache_hits_total Total repository index cache hits.",
+            "# TYPE pmcursor_repo_cache_hits_total counter",
+            f"pmcursor_repo_cache_hits_total {cache_hits}",
+            "# HELP pmcursor_repo_cache_misses_total Total repository index cache misses.",
+            "# TYPE pmcursor_repo_cache_misses_total counter",
+            f"pmcursor_repo_cache_misses_total {cache_misses}",
+        ]
+        return PlainTextResponse(
+            content="\n".join(lines) + "\n",
+            media_type="text/plain; version=0.0.4; charset=utf-8",
+        )
 
     @fastapi_app.post("/v1/drift/audit")
     def drift_audit(
