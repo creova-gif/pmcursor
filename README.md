@@ -61,6 +61,10 @@ PMCursor adapts plugin packaging and CLI conventions from [`cursor/plugins`](htt
 	```bash
 	PYTHONPATH=src python3 -m pmcursor.cli release-notes --prd PROJECT_SPEC.md --repo . --base main --version v0.1.0
 	```
+12. Start the MCP server for Cursor/Claude MCP integration (configured via [.mcp.json](.mcp.json)).
+	```bash
+	PYTHONPATH=src python3 -m pmcursor.cli mcp
+	```
 
 ## FastAPI Server & GitHub Action
 

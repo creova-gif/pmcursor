@@ -15,6 +15,7 @@ from pmcursor.drift import (
 )
 from pmcursor.eval_runner import run_eval_benchmark
 from pmcursor.indexer import index_repository
+from pmcursor.mcp_server import run_mcp_server
 from pmcursor.plugin_validator import validate_plugin_manifests
 from pmcursor.release_notes import generate_release_notes_and_coverage
 from pmcursor.tickets import audit_ticket_against_repo
@@ -35,6 +36,7 @@ CLI_EPILOG = """Examples:
   python3 -m pmcursor.cli checklist --repo . --prd PROJECT_SPEC.md --output checklist.md
   python3 -m pmcursor.cli ticket-sync --id ENG-42 --title "Add auth" --body-file ticket.md --repo .
   python3 -m pmcursor.cli serve --host 127.0.0.1 --port 8000
+  python3 -m pmcursor.cli mcp
   python3 -m pmcursor.cli validate-plugin --repo .
   python3 -m pmcursor.cli eval --json
 """
@@ -347,6 +349,19 @@ def build_parser() -> argparse.ArgumentParser:
         type=int,
         default=8000,
         help="Bind port number (default: 8000)",
+    )
+
+    mcp_parser = subparsers.add_parser(
+        "mcp",
+        help="Start the PMCursor stdio MCP server.",
+        epilog="Examples:\n  python3 -m pmcursor.cli mcp\n  python3 -m pmcursor.cli mcp --workspace-root .",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
+    mcp_parser.add_argument(
+        "--workspace-root",
+        type=Path,
+        default=None,
+        help="Optional workspace root directory to confine MCP tool repo_root arguments",
     )
 
     release_notes_parser = subparsers.add_parser(
@@ -686,6 +701,10 @@ def main(argv: Sequence[str] | None = None) -> int:
         except (RuntimeError, ValueError) as exc:
             print(f"Error: {exc}", file=sys.stderr)
             return 2
+        return 0
+
+    if args.command == "mcp":
+        run_mcp_server(allowed_workspace_root=args.workspace_root)
         return 0
 
     if args.command == "release-notes":
