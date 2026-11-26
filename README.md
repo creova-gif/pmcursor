@@ -1,6 +1,28 @@
 # PMCursor
 
+[![CI](https://github.com/creova-gif/pmcursor/actions/workflows/ci.yml/badge.svg)](https://github.com/creova-gif/pmcursor/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+[![Version](https://img.shields.io/badge/version-v0.1.0-blue.svg)](CHANGELOG.md)
+[![Python 3.11+](https://img.shields.io/badge/python-3.11+-blue.svg)](https://www.python.org/downloads/)
+
 PMCursor checks product requirements documents against repositories. It indexes Pydantic models, Zod schemas, Prisma schemas (`.prisma`), GraphQL schemas (`.graphql`/`.gql`), FastAPI routes, Next.js App Router routes, OpenAPI specs, SQL DDL tables, and architecture decision records. It also indexes telemetry events for PostHog, Vercel Analytics, Langfuse, and BigQuery, then flags contract drift and fabricated `file:line` citations.
+
+```mermaid
+flowchart LR
+    PRD["PRDs (Markdown)"] --> Indexer["AST & Contract Indexer"]
+    Tickets["Linear & Jira Tickets"] --> Indexer
+    Diffs["Git Diffs"] --> Indexer
+
+    Indexer --> Drift["Drift Audits"]
+    Indexer --> Checklist["Edge-Case Checklists"]
+    Indexer --> Flags["Feature Flag Checks"]
+    Indexer --> Release["Release Notes"]
+
+    Drift --> Outputs["MCP / FastAPI / GitHub Action"]
+    Checklist --> Outputs
+    Flags --> Outputs
+    Release --> Outputs
+```
 
 ## Architecture and adapted patterns
 
@@ -73,6 +95,14 @@ PMCursor adapts plugin packaging and CLI conventions from [`cursor/plugins`](htt
 	```bash
 	PYTHONPATH=src python3 -m pmcursor.cli federate --repos api=./backend web=./frontend --prd PROJECT_SPEC.md
 	```
+15. Verify observed runtime telemetry samples (`JSON` array or `NDJSON`) against indexed `TelemetryContract` definitions.
+	```bash
+	PYTHONPATH=src python3 -m pmcursor.cli telemetry-verify --repo . --events-file events.json
+	```
+16. Compute an organization alignment summary across contracts, feature flags, drift, scope coverage, and edge-case checklists.
+	```bash
+	PYTHONPATH=src python3 -m pmcursor.cli dashboard --repo . --prd PROJECT_SPEC.md
+	```
 
 ## FastAPI Server & GitHub Action
 
@@ -102,6 +132,8 @@ pip install 'pmcursor[server]'
 - `POST /v1/canvas`
 - `POST /v1/release-notes`
 - `POST /v1/flags/audit`
+- `POST /v1/telemetry/verify`
+- `GET /v1/dashboard`
 
 ### Composite GitHub Action
 
@@ -125,6 +157,10 @@ Link this repository into your local Cursor plugins folder:
 mkdir -p ~/.cursor/plugins/local
 ln -sfn "$(pwd)" ~/.cursor/plugins/local/pmcursor
 ```
+
+## Contributing
+
+Contributions are welcome! See [CONTRIBUTING.md](CONTRIBUTING.md) for local setup, quality gates, and the pull request workflow. PMCursor is licensed under the [MIT License](LICENSE).
 
 ## References
 

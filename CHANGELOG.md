@@ -18,7 +18,9 @@ All notable changes to PMCursor are documented in this file.
 - Added the MCP server and incremental repository cache in `src/pmcursor/mcp_server.py` (`PMCursorMCPServer`, `RepoIndexCache`, `pmcursor mcp`) alongside `.mcp.json` for IDE/agent integration.
 - Added multi-repo contract federation in `src/pmcursor/federation.py` (`merge_repo_maps`, `index_federated_repos`) with the `pmcursor federate` CLI subcommand.
 - Added feature flag & rollout contract verification in `src/pmcursor/feature_flags.py` (`extract_feature_flags`, `audit_feature_flags_and_rollout`, `FlagAuditReport`), the `pmcursor flags` CLI subcommand, and the `POST /v1/flags/audit` API endpoint.
-- Added the project milestone roadmap in `docs/ROADMAP.md`, including `M14` (Multi-Repo Federation), `M15` (Feature Flag & Rollout Contract Verification), and `M16` (Bi-Directional GitHub PR & Linear/Jira Comment Bot + Org Alignment Dashboard).
+- Added runtime telemetry sample verification in `src/pmcursor/telemetry_verify.py` (`verify_telemetry_samples`, `ObservedTelemetryEvent`, `TelemetryDriftItem`, `TelemetryVerificationReport`), the `pmcursor telemetry-verify` CLI subcommand, and the `POST /v1/telemetry/verify` API endpoint.
+- Added bi-directional comment publishing in `src/pmcursor/publisher.py` (`publish_github_pr_comment`, `publish_linear_comment`, `publish_jira_comment`, `PublishResult`) and the org alignment dashboard via `pmcursor dashboard` and `GET /v1/dashboard`.
+- Added the project milestone roadmap in `docs/ROADMAP.md` (`M1`–`M16` completed), `CONTRIBUTING.md`, and GitHub issue/PR templates under `.github/`.
 
 ### Security & Hardening
 

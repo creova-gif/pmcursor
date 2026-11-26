@@ -1,0 +1,48 @@
+name: Bug Report
+description: Report a bug or unexpected behavior in PMCursor
+title: "[Bug]: "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for taking the time to report a bug! Please fill out the details below so we can reproduce and fix it quickly.
+  - type: textarea
+    id: description
+    attributes:
+      label: Description
+      description: A clear and concise description of what the bug is.
+      placeholder: Tell us what happened...
+    validations:
+      required: true
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Steps to Reproduce
+      description: Minimal command, PRD snippet, or repository fixture needed to reproduce the issue.
+      placeholder: |
+        1. Run `PYTHONPATH=src python3 -m pmcursor.cli drift --prd ... --repo .`
+        2. Observe error...
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected Behavior
+      description: What did you expect to happen instead?
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs / CLI Output
+      description: Paste any relevant stack trace, JSON output, or terminal logs.
+      render: shell
+  - type: input
+    id: environment
+    attributes:
+      label: Environment
+      description: Python version, OS, and PMCursor version or commit SHA.
+      placeholder: "e.g., Python 3.12.4, macOS 15.1, main@abc1234"
+    validations:
+      required: true

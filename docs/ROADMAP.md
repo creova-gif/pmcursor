@@ -18,15 +18,11 @@ This roadmap tracks completed engineering milestones and upcoming platform capab
 | `M10` | Codebase-Cited Edge-Case Checklists & Prisma/GraphQL Extractors | Added `src/pmcursor/checklists.py` (`pmcursor checklist`, `POST /v1/checklist`), `.prisma` and `.graphql`/`.gql` contract indexing, `EdgeCaseChecklist` canvas rendering, and `step-summary`/`checklist` GitHub Action inputs. |
 | `M11` | Release Notes Synthesizer & Scope Coverage Matrix | Added `src/pmcursor/release_notes.py` (`ScopeCoverageReport`, `ReleaseNotesReport`, `pmcursor release-notes`, `POST /v1/release-notes`) to synthesize diff-grounded release notes and quantify PRD-to-repo scope coverage. |
 | `M12` | MCP Server & Incremental Repo Cache | Added `src/pmcursor/mcp_server.py` (`PMCursorMCPServer`, `RepoIndexCache`, `run_mcp_server`, `pmcursor mcp`) and `.mcp.json` to expose PMCursor indexing, drift auditing, checklist generation, and release-notes synthesis over MCP with incremental repo caching. |
+| `M13` | Live Telemetry & Sample Verification | Added `src/pmcursor/telemetry_verify.py` (`verify_telemetry_samples`, `ObservedTelemetryEvent`, `TelemetryDriftItem`, `TelemetryVerificationReport`), `pmcursor telemetry-verify`, and `POST /v1/telemetry/verify` to verify observed runtime telemetry samples against indexed `TelemetryContract` definitions. |
 | `M14` | Multi-Repo Federation | Added `src/pmcursor/federation.py` (`merge_repo_maps`, `index_federated_repos`) and `pmcursor federate` to merge contracts across multiple repositories into a unified alias-prefixed `RepoMap`. |
 | `M15` | Feature Flag & Rollout Contract Verification | Added `src/pmcursor/feature_flags.py` (`extract_feature_flags`, `audit_feature_flags_and_rollout`, `FlagAuditReport`), `pmcursor flags`, and `POST /v1/flags/audit` to index LaunchDarkly/Statsig/Unleash/generic flags and verify PRD rollout and rollback readiness. |
+| `M16` | Bi-Directional Comment Publisher & Org Alignment Dashboard | Added `src/pmcursor/publisher.py` (`publish_github_pr_comment`, `publish_linear_comment`, `publish_jira_comment`, `PublishResult`), `pmcursor dashboard`, and `GET /v1/dashboard` (`OrgDashboardSummary`) for bi-directional comment publishing and org-wide spec/rollout alignment reporting. |
 
 ## Upcoming Milestones
 
-### `M13` — Live Telemetry & Warehouse Verification (BigQuery / Langfuse / PostHog)
-- Extend static telemetry contract indexing with optional read-only verification against live BigQuery schemas, Langfuse traces/prompts, and PostHog event definitions.
-- Flag runtime schema/property mismatches between instrumented code, PRDs, and production analytics events.
-
-### `M16` — **Bi-Directional GitHub PR & Linear/Jira Comment Bot + Org Alignment Dashboard**
-- Enable bi-directional status synchronization and automated drift/flag-audit comments across GitHub pull requests and Linear/Jira issues.
-- Provide an org-wide alignment dashboard aggregating spec drift, rollout readiness, and cross-repo contract health.
+All planned milestones (`M1`–`M16`) are complete. Upcoming work will focus on ecosystem integrations and community requests tracked in GitHub Issues.

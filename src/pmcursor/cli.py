@@ -6,8 +6,9 @@ import subprocess
 import sys
 from collections.abc import Callable, Sequence
 from pathlib import Path
+from typing import Any
 
-from api import compute_pr_impact
+from api import OrgDashboardSummary, compute_pr_impact
 from pmcursor.checklists import generate_edge_case_checklist
 from pmcursor.drift import (
     check_spec_drift,
@@ -23,7 +24,11 @@ from pmcursor.federation import index_federated_repos
 from pmcursor.indexer import index_repository
 from pmcursor.mcp_server import run_mcp_server
 from pmcursor.plugin_validator import validate_plugin_manifests
-from pmcursor.release_notes import generate_release_notes_and_coverage
+from pmcursor.release_notes import (
+    compute_scope_coverage,
+    generate_release_notes_and_coverage,
+)
+from pmcursor.telemetry_verify import verify_telemetry_samples
 from pmcursor.tickets import audit_ticket_against_repo
 from web.canvas import render_split_pane_canvas
 
@@ -466,6 +471,54 @@ def build_parser() -> argparse.ArgumentParser:
         help="Emit machine-readable JSON output",
     )
 
+    telemetry_parser = subparsers.add_parser(
+        "telemetry-verify",
+        help="Verify observed runtime telemetry samples against indexed TelemetryContract definitions.",
+        epilog="Examples:\n  python3 -m pmcursor.cli telemetry-verify --repo . --events-file events.json\n  python3 -m pmcursor.cli telemetry-verify --repo . --events-file events.ndjson --json",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
+    telemetry_parser.add_argument(
+        "--repo",
+        type=Path,
+        default=Path("."),
+        help="Repository root directory (default: .)",
+    )
+    telemetry_parser.add_argument(
+        "--events-file",
+        type=Path,
+        required=True,
+        help="Path to a JSON array or NDJSON file of observed telemetry events",
+    )
+    telemetry_parser.add_argument(
+        "--json",
+        action="store_true",
+        help="Emit JSON TelemetryVerificationReport",
+    )
+
+    dashboard_parser = subparsers.add_parser(
+        "dashboard",
+        help="Compute an organization alignment summary across contracts, flags, drift, coverage, and checklist.",
+        epilog="Examples:\n  python3 -m pmcursor.cli dashboard --repo . --prd PROJECT_SPEC.md\n  python3 -m pmcursor.cli dashboard --repo . --json",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
+    dashboard_parser.add_argument(
+        "--repo",
+        type=Path,
+        default=Path("."),
+        help="Repository root directory (default: .)",
+    )
+    dashboard_parser.add_argument(
+        "--prd",
+        type=Path,
+        default=Path("PROJECT_SPEC.md"),
+        help="Path to the PRD markdown file (default: PROJECT_SPEC.md)",
+    )
+    dashboard_parser.add_argument(
+        "--json",
+        action="store_true",
+        help="Emit JSON OrgDashboardSummary",
+    )
+
     return parser
 
 
@@ -497,6 +550,27 @@ def _load_diff_text(diff_path: Path | None, repo_path: Path, base_ref: str) -> s
     if proc.returncode != 0:
         return ""
     return proc.stdout
+
+
+def _load_telemetry_events(events_file: Path) -> list[dict[str, Any]]:
+    raw_text = events_file.read_text(encoding="utf-8").strip()
+    if not raw_text:
+        return []
+    if raw_text.startswith("["):
+        parsed = json.loads(raw_text)
+        if not isinstance(parsed, list) or not all(isinstance(item, dict) for item in parsed):
+            raise ValueError("JSON events file must contain a list of event objects.")
+        return parsed
+    events: list[dict[str, Any]] = []
+    for line in raw_text.splitlines():
+        stripped = line.strip()
+        if not stripped:
+            continue
+        item = json.loads(stripped)
+        if not isinstance(item, dict):
+            raise TypeError("Each NDJSON line must be a JSON object.")
+        events.append(item)
+    return events
 
 
 def main(argv: Sequence[str] | None = None) -> int:
@@ -897,6 +971,112 @@ def main(argv: Sequence[str] | None = None) -> int:
                 f"{len(federated_map.routes)} routes, "
                 f"{len(federated_map.telemetry)} telemetry, "
                 f"{len(federated_map.adrs)} ADRs"
+            )
+        return 0
+
+    if args.command == "telemetry-verify":
+        repo_path = args.repo
+        events_file: Path = args.events_file
+        if not repo_path.is_dir():
+            print(
+                f"Error: Repository directory '{repo_path}' does not exist.\n"
+                "  Try: python3 -m pmcursor.cli telemetry-verify --repo . --events-file events.json",
+                file=sys.stderr,
+            )
+            return 2
+        if not events_file.is_file():
+            print(
+                f"Error: Events file '{events_file}' not found.\n"
+                "  Try: python3 -m pmcursor.cli telemetry-verify --repo . --events-file events.json",
+                file=sys.stderr,
+            )
+            return 2
+        try:
+            events = _load_telemetry_events(events_file)
+        except (json.JSONDecodeError, TypeError, ValueError) as exc:
+            print(f"Error: Invalid telemetry events file '{events_file}': {exc}", file=sys.stderr)
+            return 2
+        repo_map = index_repository(repo_path)
+        telemetry_report = verify_telemetry_samples(repo_map, events)
+        if args.json:
+            print(telemetry_report.model_dump_json(indent=2))
+        else:
+            print(
+                telemetry_report.markdown,
+                end="" if telemetry_report.markdown.endswith("\n") else "\n",
+            )
+        return 0
+
+    if args.command == "dashboard":
+        repo_path = args.repo
+        if not repo_path.is_dir():
+            print(
+                f"Error: Repository directory '{repo_path}' does not exist.\n"
+                "  Try: python3 -m pmcursor.cli dashboard --repo . --prd PROJECT_SPEC.md",
+                file=sys.stderr,
+            )
+            return 2
+        resolved_repo = repo_path.resolve()
+        prd_arg: Path = args.prd
+        if not prd_arg.is_absolute() and (resolved_repo / prd_arg).is_file():
+            prd_md = (resolved_repo / prd_arg).read_text(encoding="utf-8")
+            prd_label = prd_arg.as_posix()
+        elif prd_arg.is_file():
+            prd_md = prd_arg.read_text(encoding="utf-8")
+            prd_label = prd_arg.as_posix()
+        else:
+            prd_md = ""
+            prd_label = prd_arg.as_posix()
+
+        repo_map = index_repository(repo_path)
+        flags = extract_feature_flags(repo_path)
+        drift_report = check_spec_drift(
+            prd_md,
+            repo_map,
+            prd_path=prd_label,
+            repo_root=resolved_repo,
+        )
+        scope_coverage = compute_scope_coverage(prd_md, repo_map)
+        checklist = generate_edge_case_checklist(
+            repo_map,
+            prd_markdown=prd_md or None,
+            repo_root=resolved_repo,
+        )
+        summary = OrgDashboardSummary(
+            repo_root=repo_map.repo_root,
+            models_count=len(repo_map.models),
+            routes_count=len(repo_map.routes),
+            telemetry_count=len(repo_map.telemetry),
+            adrs_count=len(repo_map.adrs),
+            feature_flags_count=len(flags),
+            alignment_score=drift_report.alignment_score.overall_score,
+            scope_coverage_percent=scope_coverage.coverage_percent,
+            p0_checklist_items=checklist.p0_count,
+            status=drift_report.status,
+        )
+        if args.json:
+            print(summary.model_dump_json(indent=2))
+        else:
+            print(
+                "\n".join(
+                    [
+                        "## PMCursor Org Alignment Dashboard",
+                        f"- **Repo:** `{summary.repo_root}`",
+                        (
+                            f"- **Status:** `{summary.status}` "
+                            f"(Alignment Score: **{summary.alignment_score}/100**, "
+                            f"Scope Coverage: **{summary.scope_coverage_percent}%**)"
+                        ),
+                        (
+                            f"- **Contracts:** {summary.models_count} models, "
+                            f"{summary.routes_count} routes, "
+                            f"{summary.telemetry_count} telemetry, "
+                            f"{summary.adrs_count} ADRs, "
+                            f"{summary.feature_flags_count} feature flags"
+                        ),
+                        f"- **P0 Checklist Items:** {summary.p0_checklist_items}",
+                    ]
+                )
             )
         return 0
 

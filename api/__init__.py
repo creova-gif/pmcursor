@@ -6,11 +6,12 @@ import re
 from pathlib import Path
 from typing import Any
 
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict
 
 from pmcursor.drift import check_spec_drift
 from pmcursor.indexer import index_repository
 from pmcursor.models import (
+    CompletionStatus,
     DriftReport,
     PRImpactItem,
     PRImpactReport,
@@ -57,6 +58,26 @@ class ReleaseNotesRequest(BaseModel):
 class FlagAuditRequest(BaseModel):
     prd_markdown: str
     repo_root: str = "."
+
+
+class TelemetryVerifyRequest(BaseModel):
+    repo_root: str = "."
+    events: list[dict[str, Any]]
+
+
+class OrgDashboardSummary(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
+    repo_root: str
+    models_count: int
+    routes_count: int
+    telemetry_count: int
+    adrs_count: int
+    feature_flags_count: int
+    alignment_score: int
+    scope_coverage_percent: float
+    p0_checklist_items: int
+    status: CompletionStatus
 
 
 class GitHubWebhookPayload(BaseModel):

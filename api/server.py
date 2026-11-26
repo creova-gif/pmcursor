@@ -18,7 +18,9 @@ from api import (
     DriftAuditRequest,
     FlagAuditRequest,
     GitHubWebhookPayload,
+    OrgDashboardSummary,
     ReleaseNotesRequest,
+    TelemetryVerifyRequest,
     TicketAuditRequest,
     audit_prd_against_repo,
     compute_pr_impact,
@@ -30,12 +32,21 @@ from api import (
 )
 from pmcursor.checklists import EdgeCaseChecklist, generate_edge_case_checklist
 from pmcursor.drift import check_spec_drift
-from pmcursor.feature_flags import FlagAuditReport, audit_feature_flags_and_rollout
+from pmcursor.feature_flags import (
+    FlagAuditReport,
+    audit_feature_flags_and_rollout,
+    extract_feature_flags,
+)
 from pmcursor.indexer import index_repository
 from pmcursor.models import DriftReport, PRImpactReport
 from pmcursor.release_notes import (
     ReleaseNotesReport,
+    compute_scope_coverage,
     generate_release_notes_and_coverage,
+)
+from pmcursor.telemetry_verify import (
+    TelemetryVerificationReport,
+    verify_telemetry_samples,
 )
 from pmcursor.tickets import TicketSyncReport, audit_ticket_against_repo
 from web.canvas import render_split_pane_canvas
@@ -242,6 +253,59 @@ def create_app(
         _require_auth(api_token, authorization, x_pmcursor_token)
         repo_path = _resolve_allowed_repo_root(payload.repo_root, allowed_workspace_root)
         return audit_feature_flags_and_rollout(payload.prd_markdown, repo_path)
+
+    @fastapi_app.post("/v1/telemetry/verify", response_model=TelemetryVerificationReport)
+    def telemetry_verify_endpoint(
+        body: TelemetryVerifyRequest,
+        authorization: str = Header(default="", alias="Authorization"),
+        x_pmcursor_token: str = Header(default="", alias="X-PMCursor-Token"),
+    ) -> TelemetryVerificationReport:
+        _require_auth(api_token, authorization, x_pmcursor_token)
+        repo_path = _resolve_allowed_repo_root(body.repo_root, allowed_workspace_root)
+        repo_map = index_repository(repo_path)
+        return verify_telemetry_samples(repo_map, body.events)
+
+    @fastapi_app.get("/v1/dashboard", response_model=OrgDashboardSummary)
+    def dashboard_endpoint(
+        repo_root: str = ".",
+        prd_path: str = "PROJECT_SPEC.md",
+        authorization: str = Header(default="", alias="Authorization"),
+        x_pmcursor_token: str = Header(default="", alias="X-PMCursor-Token"),
+    ) -> OrgDashboardSummary:
+        _require_auth(api_token, authorization, x_pmcursor_token)
+        repo_path = _resolve_allowed_repo_root(repo_root, allowed_workspace_root)
+        prd_file = (repo_path / prd_path).resolve()
+        prd_markdown = (
+            prd_file.read_text(encoding="utf-8")
+            if prd_file.is_relative_to(repo_path) and prd_file.is_file()
+            else ""
+        )
+        repo_map = index_repository(repo_path)
+        flags = extract_feature_flags(repo_path)
+        drift_report = check_spec_drift(
+            prd_markdown,
+            repo_map,
+            prd_path=prd_path,
+            repo_root=repo_path,
+        )
+        scope_coverage = compute_scope_coverage(prd_markdown, repo_map)
+        checklist = generate_edge_case_checklist(
+            repo_map,
+            prd_markdown=prd_markdown or None,
+            repo_root=repo_path,
+        )
+        return OrgDashboardSummary(
+            repo_root=repo_map.repo_root,
+            models_count=len(repo_map.models),
+            routes_count=len(repo_map.routes),
+            telemetry_count=len(repo_map.telemetry),
+            adrs_count=len(repo_map.adrs),
+            feature_flags_count=len(flags),
+            alignment_score=drift_report.alignment_score.overall_score,
+            scope_coverage_percent=scope_coverage.coverage_percent,
+            p0_checklist_items=checklist.p0_count,
+            status=drift_report.status,
+        )
 
     @fastapi_app.post("/v1/webhooks/github")
     async def github_webhook(
