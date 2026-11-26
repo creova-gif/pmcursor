@@ -169,7 +169,40 @@ def create_app(
 app = create_app()
 
 
+def _is_loopback_host(host: str) -> bool:
+    return host.strip().lower() in {"127.0.0.1", "localhost", "::1"}
+
+
 def run_server(host: str = "127.0.0.1", port: int = 8000) -> None:
     """Start the PMCursor FastAPI server using uvicorn."""
-    uvicorn_module: Any = importlib.import_module("uvicorn")
-    uvicorn_module.run(app, host=host, port=port)
+    if (
+        not _is_loopback_host(host)
+        and not os.environ.get("PMCURSOR_API_TOKEN", "").strip()
+    ):
+        raise ValueError(
+            f"Refusing to bind non-loopback host '{host}' without PMCURSOR_API_TOKEN set. "
+            "Set PMCURSOR_API_TOKEN or bind to 127.0.0.1."
+        )
+    raw_concurrency = os.environ.get("WEB_CONCURRENCY", "").strip()
+    workers = 1
+    if raw_concurrency:
+        try:
+            workers = int(raw_concurrency)
+        except ValueError as exc:
+            raise ValueError(
+                f"Invalid WEB_CONCURRENCY value '{raw_concurrency}': must be a positive integer."
+            ) from exc
+        if workers <= 0:
+            raise ValueError(
+                f"Invalid WEB_CONCURRENCY value '{raw_concurrency}': must be a positive integer."
+            )
+    try:
+        uvicorn_module: Any = importlib.import_module("uvicorn")
+    except ModuleNotFoundError as exc:
+        raise RuntimeError(
+            "uvicorn is required to run the server. Install with: pip install 'pmcursor[server]'"
+        ) from exc
+    if workers > 1:
+        uvicorn_module.run("api.server:app", host=host, port=port, workers=workers)
+    else:
+        uvicorn_module.run(app, host=host, port=port)

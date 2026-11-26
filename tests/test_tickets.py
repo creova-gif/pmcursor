@@ -8,7 +8,8 @@ import pytest
 from api.server import _is_authorized
 from pmcursor.cli import main
 from pmcursor.indexer import index_repository
-from pmcursor.tickets import audit_ticket_against_repo
+from pmcursor.models import DriftFinding, DriftReport, SpecAlignmentScore
+from pmcursor.tickets import _format_ticket_comment, audit_ticket_against_repo
 
 
 def _write_sample_repo(tmp_path: Path) -> Path:
@@ -167,3 +168,51 @@ def test_is_authorized_preserves_trailing_latin1_bytes_for_a_grave_and_a_ring(
     assert _is_authorized(token, f"Bearer {wire_latin1}", "") is True
     assert _is_authorized(token, "", wire_latin1) is True
     assert _is_authorized(token, f"Bearer {wire_latin1}x", "") is False
+
+
+def test_format_ticket_comment_escapes_markdown_table_cells_and_title_newlines() -> None:
+    report = DriftReport(
+        prd_path="linear:LIN-99",
+        status="DONE_WITH_CONCERNS",
+        alignment_score=SpecAlignmentScore(
+            overall_score=75,
+            deterministic_score=80,
+            workflow_score=65,
+            has_acceptance_cards=True,
+            has_rollback_section=False,
+            has_out_of_scope_section=False,
+            has_adr_references=False,
+        ),
+        total_spec_contracts=1,
+        matched_contracts=0,
+        total_citations_checked=1,
+        fabricated_citations_count=0,
+        findings=[
+            DriftFinding(
+                category="type_mismatch",
+                severity="high",
+                spec_reference="TicketItem.priority: str | int\nline2",
+                code_citation="models.py:5\r\n|extra",
+                message="Expected `str | int`\nbut found `int`",
+                remediation="Align field type.",
+            )
+        ],
+    )
+
+    comment = _format_ticket_comment(
+        ticket_id="LIN-99",
+        provider="linear",
+        title="Fix\r\nticket\rnewline\ntitle",
+        report=report,
+    )
+
+    assert "**Title:** Fix ticket newline title\n" in comment
+    table_lines = [line for line in comment.splitlines() if line.startswith("|")]
+    assert len(table_lines) == 3
+    data_row = table_lines[2]
+    assert data_row == (
+        "| `HIGH` | `type_mismatch` "
+        "| `TicketItem.priority: str \\| int line2` "
+        "| `models.py:5 \\|extra` "
+        "| Expected `str \\| int` but found `int` |"
+    )
