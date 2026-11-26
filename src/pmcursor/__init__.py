@@ -13,6 +13,14 @@ from pmcursor.drift import (
     format_drift_report_markdown,
 )
 from pmcursor.eval_runner import run_eval_benchmark
+from pmcursor.feature_flags import (
+    FeatureFlagContract,
+    FeatureFlagProvider,
+    FlagAuditReport,
+    audit_feature_flags_and_rollout,
+    extract_feature_flags,
+)
+from pmcursor.federation import index_federated_repos, merge_repo_maps
 from pmcursor.indexer import index_repository
 from pmcursor.mcp_server import (
     PMCursorMCPServer,
@@ -59,8 +67,11 @@ __all__ = [
     "EdgeCaseItem",
     "EdgeCasePriority",
     "EvalBenchmarkResult",
+    "FeatureFlagContract",
+    "FeatureFlagProvider",
     "FieldContract",
     "FixPrdResult",
+    "FlagAuditReport",
     "ModelContract",
     "PMCursorMCPServer",
     "PRImpactItem",
@@ -77,15 +88,19 @@ __all__ = [
     "TelemetrySourceKind",
     "TicketProvider",
     "TicketSyncReport",
+    "audit_feature_flags_and_rollout",
     "audit_ticket_against_repo",
     "check_spec_drift",
     "compute_scope_coverage",
+    "extract_feature_flags",
     "fix_prd_markdown",
     "format_drift_report_markdown",
     "generate_edge_case_checklist",
     "generate_release_notes_and_coverage",
     "healthcheck",
+    "index_federated_repos",
     "index_repository",
+    "merge_repo_maps",
     "run_eval_benchmark",
     "run_mcp_server",
     "validate_plugin_manifests",

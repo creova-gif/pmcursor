@@ -16,7 +16,9 @@ All notable changes to PMCursor are documented in this file.
 - Added optional `EdgeCaseChecklist` rendering in `render_split_pane_canvas` (`web/canvas.py`) with HTML escaping for all checklist fields.
 - Added the release notes synthesizer and PRD scope coverage matrix in `src/pmcursor/release_notes.py` (`ScopeCoverageReport`, `pmcursor release-notes`, and `POST /v1/release-notes`).
 - Added the MCP server and incremental repository cache in `src/pmcursor/mcp_server.py` (`PMCursorMCPServer`, `RepoIndexCache`, `pmcursor mcp`) alongside `.mcp.json` for IDE/agent integration.
-- Added the project milestone roadmap in `docs/ROADMAP.md`, including the `M15` Feature Flag & Rollout Contract Verification milestone expansion.
+- Added multi-repo contract federation in `src/pmcursor/federation.py` (`merge_repo_maps`, `index_federated_repos`) with the `pmcursor federate` CLI subcommand.
+- Added feature flag & rollout contract verification in `src/pmcursor/feature_flags.py` (`extract_feature_flags`, `audit_feature_flags_and_rollout`, `FlagAuditReport`), the `pmcursor flags` CLI subcommand, and the `POST /v1/flags/audit` API endpoint.
+- Added the project milestone roadmap in `docs/ROADMAP.md`, including `M14` (Multi-Repo Federation), `M15` (Feature Flag & Rollout Contract Verification), and `M16` (Bi-Directional GitHub PR & Linear/Jira Comment Bot + Org Alignment Dashboard).
 
 ### Security & Hardening
 

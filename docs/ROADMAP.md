@@ -18,6 +18,8 @@ This roadmap tracks completed engineering milestones and upcoming platform capab
 | `M10` | Codebase-Cited Edge-Case Checklists & Prisma/GraphQL Extractors | Added `src/pmcursor/checklists.py` (`pmcursor checklist`, `POST /v1/checklist`), `.prisma` and `.graphql`/`.gql` contract indexing, `EdgeCaseChecklist` canvas rendering, and `step-summary`/`checklist` GitHub Action inputs. |
 | `M11` | Release Notes Synthesizer & Scope Coverage Matrix | Added `src/pmcursor/release_notes.py` (`ScopeCoverageReport`, `ReleaseNotesReport`, `pmcursor release-notes`, `POST /v1/release-notes`) to synthesize diff-grounded release notes and quantify PRD-to-repo scope coverage. |
 | `M12` | MCP Server & Incremental Repo Cache | Added `src/pmcursor/mcp_server.py` (`PMCursorMCPServer`, `RepoIndexCache`, `run_mcp_server`, `pmcursor mcp`) and `.mcp.json` to expose PMCursor indexing, drift auditing, checklist generation, and release-notes synthesis over MCP with incremental repo caching. |
+| `M14` | Multi-Repo Federation | Added `src/pmcursor/federation.py` (`merge_repo_maps`, `index_federated_repos`) and `pmcursor federate` to merge contracts across multiple repositories into a unified alias-prefixed `RepoMap`. |
+| `M15` | Feature Flag & Rollout Contract Verification | Added `src/pmcursor/feature_flags.py` (`extract_feature_flags`, `audit_feature_flags_and_rollout`, `FlagAuditReport`), `pmcursor flags`, and `POST /v1/flags/audit` to index LaunchDarkly/Statsig/Unleash/generic flags and verify PRD rollout and rollback readiness. |
 
 ## Upcoming Milestones
 
@@ -25,10 +27,6 @@ This roadmap tracks completed engineering milestones and upcoming platform capab
 - Extend static telemetry contract indexing with optional read-only verification against live BigQuery schemas, Langfuse traces/prompts, and PostHog event definitions.
 - Flag runtime schema/property mismatches between instrumented code, PRDs, and production analytics events.
 
-### `M14` — Multi-Repo Federation & Bi-Directional PR/Linear Control Plane
-- Support cross-repository contract graphs (e.g., shared OpenAPI/GraphQL/Protobuf schemas across backend and frontend repos) in a unified `RepoMap`.
-- Enable bi-directional status synchronization and automated drift comments across GitHub pull requests and Linear/Jira issues.
-
-### `M15` — Feature Flag & Rollout Contract Verification
-- Index LaunchDarkly, Statsig, and Unleash feature flag contracts alongside existing codebase contracts.
-- Verify PRD rollout and rollback plans against active flag definitions and detect stale flag citations.
+### `M16` — **Bi-Directional GitHub PR & Linear/Jira Comment Bot + Org Alignment Dashboard**
+- Enable bi-directional status synchronization and automated drift/flag-audit comments across GitHub pull requests and Linear/Jira issues.
+- Provide an org-wide alignment dashboard aggregating spec drift, rollout readiness, and cross-repo contract health.

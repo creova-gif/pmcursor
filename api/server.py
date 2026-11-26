@@ -16,6 +16,7 @@ from api import (
     CanvasRequest,
     ChecklistRequest,
     DriftAuditRequest,
+    FlagAuditRequest,
     GitHubWebhookPayload,
     ReleaseNotesRequest,
     TicketAuditRequest,
@@ -29,6 +30,7 @@ from api import (
 )
 from pmcursor.checklists import EdgeCaseChecklist, generate_edge_case_checklist
 from pmcursor.drift import check_spec_drift
+from pmcursor.feature_flags import FlagAuditReport, audit_feature_flags_and_rollout
 from pmcursor.indexer import index_repository
 from pmcursor.models import DriftReport, PRImpactReport
 from pmcursor.release_notes import (
@@ -230,6 +232,16 @@ def create_app(
             version=body.version,
             repo_root=repo_path,
         )
+
+    @fastapi_app.post("/v1/flags/audit", response_model=FlagAuditReport)
+    def flags_audit_endpoint(
+        payload: FlagAuditRequest,
+        authorization: str = Header(default="", alias="Authorization"),
+        x_pmcursor_token: str = Header(default="", alias="X-PMCursor-Token"),
+    ) -> FlagAuditReport:
+        _require_auth(api_token, authorization, x_pmcursor_token)
+        repo_path = _resolve_allowed_repo_root(payload.repo_root, allowed_workspace_root)
+        return audit_feature_flags_and_rollout(payload.prd_markdown, repo_path)
 
     @fastapi_app.post("/v1/webhooks/github")
     async def github_webhook(
