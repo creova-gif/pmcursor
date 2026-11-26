@@ -4,4 +4,8 @@
 - **Mitigations:** Strict schema validation, `org_id` tenant scoping, GCP Secret Manager + OIDC, `gitleaks` in CI.
 - **Server Bind Guard (`api/server.py`):** `PMCURSOR_API_TOKEN` is required when binding outside loopback hosts (`127.0.0.1`, `localhost`, `::1`).
 - **Webhook Authentication & Workspace Containment (`api/server.py`):** Linear webhooks authenticate via `Linear-Signature` (HMAC-SHA256, `PMCURSOR_LINEAR_WEBHOOK_SECRET`), Jira webhooks authenticate via `X-Hub-Signature` (HMAC-SHA256, `PMCURSOR_JIRA_WEBHOOK_SECRET`) or Bearer `PMCURSOR_API_TOKEN`, and `_resolve_allowed_repo_root` enforces containment within `allowed_workspace_root`.
+- **Rate Limiting (`api/server.py`):** `PMCURSOR_RATE_LIMIT_PER_MIN` enforces per-client sliding-window rate limiting, returning HTTP `429 Too Many Requests` with a `Retry-After` header when exceeded (`/health` and `/readyz` probes are exempt).
+- **Webhook Replay Deduplication (`api/server.py`):** `_DeliveryDeduplicator` tracks `X-GitHub-Delivery` and `Linear-Delivery` delivery IDs to prevent replay of duplicate webhook deliveries.
+- **Security Response Headers (`api/server.py`):** Responses include `X-Content-Type-Options: nosniff`, `X-Frame-Options: DENY`, and `Referrer-Policy: no-referrer`.
+- **Thread-Safe Cache Locking (`src/pmcursor/mcp_server.py`):** `RepoIndexCache` protects concurrent cache reads and writes with `threading.RLock`.
 - **Markdown Table Injection Mitigation (`src/pmcursor/tickets.py`):** `_escape_markdown_cell` normalizes line breaks and escapes `|` characters to prevent table-injection and row breaking in generated ticket comments.

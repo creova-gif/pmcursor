@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import hashlib
+import hmac
 import json
 import logging
 import re
@@ -221,3 +223,106 @@ def test_prometheus_metrics_endpoint(tmp_path: Path) -> None:
     assert "pmcursor_repo_cache_entries 1" in body
     assert "pmcursor_repo_cache_hits_total" in body
     assert "pmcursor_repo_cache_misses_total" in body
+
+
+def test_security_headers_present_on_responses() -> None:
+    app = create_app()
+    client = TestClient(app)
+
+    health_resp = client.get("/health")
+    assert health_resp.status_code == 200
+    assert health_resp.headers.get("X-Content-Type-Options") == "nosniff"
+    assert health_resp.headers.get("X-Frame-Options") == "DENY"
+    assert health_resp.headers.get("Referrer-Policy") == "no-referrer"
+
+    error_resp = client.post(
+        "/v1/drift/audit",
+        content=b"{}",
+        headers={
+            "Content-Type": "application/json",
+            "Content-Length": str(MAX_REQUEST_BYTES + 1),
+        },
+    )
+    assert error_resp.status_code == 413
+    assert error_resp.headers.get("X-Content-Type-Options") == "nosniff"
+    assert error_resp.headers.get("X-Frame-Options") == "DENY"
+    assert error_resp.headers.get("Referrer-Policy") == "no-referrer"
+
+
+def test_sliding_window_rate_limit_and_probe_exemptions(tmp_path: Path) -> None:
+    repo = _create_sample_repo(tmp_path)
+    app = create_app(rate_limit_per_minute=2)
+    client = TestClient(app)
+
+    payload: dict[str, Any] = {
+        "repo_root": str(repo),
+        "prd_markdown": "# PRD\n\n- User model\n",
+        "prd_path": "PRD.md",
+    }
+    first = client.post("/v1/drift/audit", json=payload)
+    second = client.post("/v1/drift/audit", json=payload)
+    third = client.post("/v1/drift/audit", json=payload)
+
+    assert first.status_code == 200
+    assert second.status_code == 200
+    assert third.status_code == 429
+    assert third.json() == {"detail": "Rate limit exceeded"}
+    assert third.headers.get("Retry-After") == "60"
+    assert third.headers.get("X-Request-ID") is not None
+    assert third.headers.get("X-Process-Time-Ms") is not None
+    assert third.headers.get("X-Content-Type-Options") == "nosniff"
+
+    for _ in range(5):
+        assert client.get("/health").status_code == 200
+        assert client.get("/readyz").status_code == 200
+
+
+def test_github_and_linear_webhook_delivery_deduplication(tmp_path: Path) -> None:
+    repo = _create_sample_repo(tmp_path)
+    gh_secret = "gh-secret"
+    lin_secret = "lin-secret"
+    app = create_app(
+        webhook_secret=gh_secret,
+        linear_webhook_secret=lin_secret,
+        allowed_workspace_root=tmp_path,
+    )
+    client = TestClient(app)
+
+    gh_body = json.dumps({"zen": "Keep it logically awesome.", "hook_id": 99}).encode(
+        "utf-8"
+    )
+    gh_sig = (
+        "sha256="
+        + hmac.new(gh_secret.encode("utf-8"), gh_body, hashlib.sha256).hexdigest()
+    )
+    gh_headers = {
+        "Content-Type": "application/json",
+        "X-Hub-Signature-256": gh_sig,
+        "X-GitHub-Delivery": "gh-deliv-1",
+    }
+    gh_first = client.post("/v1/webhooks/github", content=gh_body, headers=gh_headers)
+    gh_second = client.post("/v1/webhooks/github", content=gh_body, headers=gh_headers)
+    assert gh_first.status_code == 200
+    assert gh_first.json() == {"status": "pong", "hook_id": 99}
+    assert gh_second.status_code == 200
+    assert gh_second.json() == {"status": "duplicate", "delivery_id": "gh-deliv-1"}
+
+    lin_body = json.dumps(
+        {
+            "type": "Comment",
+            "repo_root": str(repo),
+            "data": {"id": "1"},
+        }
+    ).encode("utf-8")
+    lin_sig = hmac.new(lin_secret.encode("utf-8"), lin_body, hashlib.sha256).hexdigest()
+    lin_headers = {
+        "Content-Type": "application/json",
+        "Linear-Signature": lin_sig,
+        "Linear-Delivery": "lin-deliv-1",
+    }
+    lin_first = client.post("/v1/webhooks/linear", content=lin_body, headers=lin_headers)
+    lin_second = client.post("/v1/webhooks/linear", content=lin_body, headers=lin_headers)
+    assert lin_first.status_code == 200
+    assert lin_first.json() == {"status": "ignored", "event_type": "Comment"}
+    assert lin_second.status_code == 200
+    assert lin_second.json() == {"status": "duplicate", "delivery_id": "lin-deliv-1"}
