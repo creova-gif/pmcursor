@@ -106,12 +106,15 @@ def _post_json(
 
     data = json.dumps(payload).encode("utf-8")
     request_headers = {"Content-Type": "application/json", **headers}
-    req = urllib.request.Request(url=url, data=data, headers=request_headers, method="POST")
+    # URL scheme & SSRF safety verified above via _validate_outbound_url.
+    req = urllib.request.Request(  # noqa: S310
+        url=url, data=data, headers=request_headers, method="POST"
+    )
 
     status_code = 0
     for attempt in range(max_retries + 1):
         try:
-            with urllib.request.urlopen(req, timeout=15) as resp:
+            with urllib.request.urlopen(req, timeout=15) as resp:  # noqa: S310
                 status_code = int(getattr(resp, "status", 200))
             break
         except urllib.error.HTTPError as exc:
