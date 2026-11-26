@@ -29,6 +29,7 @@ All notable changes to PMCursor are documented in this file.
 - Added the `pmcursor publish` CLI subcommand and `POST /v1/publish` endpoint in `api/server.py` to publish comments to GitHub PRs, Linear issues, and Jira issues.
 - Added `PMCURSOR_CORS_ORIGINS` configuration for allowed CORS origins in `api/server.py`.
 - Added `tests/test_release_consistency.py` to verify version parity across `pyproject.toml`, `.cursor-plugin/plugin.json`, and `.claude-plugin/plugin.json` and non-empty release files.
+- Added `.env.example` and `docker-compose.yml` for local Docker Compose container startup and environment configuration.
 
 ### Performance
 

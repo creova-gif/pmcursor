@@ -6,6 +6,15 @@ This guide covers building, configuring, and running the `pmcursor` FastAPI serv
 
 The repository root includes a multi-stage [`Dockerfile`](../Dockerfile) based on `python:3.12-slim` that installs `pmcursor[server]` and runs `uvicorn api.server:app` as the non-root `pmcursor` user on port `8000`.
 
+### Quickstart with Docker Compose
+
+Copy [`.env.example`](../.env.example) to `.env`, set your secrets (such as `PMCURSOR_API_TOKEN`), and start the service with Docker Compose:
+
+```bash
+cp .env.example .env
+docker compose up --build
+```
+
 ### Build the Image
 
 ```bash

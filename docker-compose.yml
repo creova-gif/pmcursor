@@ -1,0 +1,29 @@
+services:
+  pmcursor:
+    build: .
+    ports:
+      - "8000:8000"
+    environment:
+      PMCURSOR_API_TOKEN: ${PMCURSOR_API_TOKEN:-}
+      PMCURSOR_WEBHOOK_SECRET: ${PMCURSOR_WEBHOOK_SECRET:-}
+      PMCURSOR_LINEAR_WEBHOOK_SECRET: ${PMCURSOR_LINEAR_WEBHOOK_SECRET:-}
+      PMCURSOR_JIRA_WEBHOOK_SECRET: ${PMCURSOR_JIRA_WEBHOOK_SECRET:-}
+      PMCURSOR_RATE_LIMIT_PER_MIN: ${PMCURSOR_RATE_LIMIT_PER_MIN:-120}
+      PMCURSOR_TRUST_PROXY: ${PMCURSOR_TRUST_PROXY:-false}
+      PMCURSOR_CORS_ORIGINS: ${PMCURSOR_CORS_ORIGINS:-}
+      WEB_CONCURRENCY: ${WEB_CONCURRENCY:-1}
+    volumes:
+      - .:/workspace:ro
+    restart: unless-stopped
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "python3",
+          "-c",
+          "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=3)",
+        ]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
