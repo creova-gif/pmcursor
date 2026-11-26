@@ -120,6 +120,13 @@ Install the optional server dependencies before running `serve` or starting [api
 pip install 'pmcursor[server]'
 ```
 
+For local container development, copy [.env.example](.env.example) to `.env` and start the server with Docker Compose:
+
+```bash
+cp .env.example .env
+docker compose up --build
+```
+
 ### Configuration
 
 - `PMCURSOR_API_TOKEN`: Bearer token for API authentication. Required when binding `serve` to a non-loopback host (anything other than `127.0.0.1`, `localhost`, or `::1`).
