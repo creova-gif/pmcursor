@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import html
 
+from pmcursor.checklists import EdgeCaseChecklist
 from pmcursor.models import (
     ADRContract,
     CompletionStatus,
@@ -605,7 +606,44 @@ def _render_contract_group(title: str, group_id: str, cards: list[str]) -> str:
     )
 
 
-def _render_contracts_pane(repo_map: RepoMap) -> str:
+def _render_edge_case_checklist(checklist: EdgeCaseChecklist) -> str:
+    if not checklist.items:
+        items_html = '<div class="empty-state">No edge-case checklist items generated.</div>'
+    else:
+        cards: list[str] = []
+        for item in checklist.items:
+            priority_badge = _esc(f"[{item.priority}]")
+            cards.append(
+                '<article class="contract-card">'
+                '<div class="contract-top">'
+                '<div style="display: flex; align-items: center; gap: 8px; flex-wrap: wrap;">'
+                f'<span class="severity-pill">{priority_badge}</span>'
+                f'<span class="contract-name mono">{_esc(item.contract_name)}</span>'
+                "</div>"
+                f'<span class="citation-pill">{_esc(item.citation)}</span>'
+                "</div>"
+                f'<div class="contract-meta">Category: <span class="mono">{_esc(item.category)}</span></div>'
+                f'<div class="contract-meta"><strong>Scenario:</strong> {_esc(item.scenario)}</div>'
+                f'<div class="contract-meta"><strong>Expected:</strong> {_esc(item.expected_behavior)}</div>'
+                "</article>"
+            )
+        items_html = f'<div class="contract-list">{"".join(cards)}</div>'
+
+    return (
+        '<section class="edge-case-section" aria-label="QA Edge-Case Checklist">'
+        '<div class="contract-group-header">'
+        '<h3 class="section-title" style="margin: 0;">QA Edge-Case Checklist</h3>'
+        f'<span class="contract-count tabular">Total: {checklist.total_items} · P0: {checklist.p0_count}</span>'
+        "</div>"
+        f"{items_html}"
+        "</section>"
+    )
+
+
+def _render_contracts_pane(
+    repo_map: RepoMap,
+    checklist: EdgeCaseChecklist | None = None,
+) -> str:
     model_cards = [_render_model_card(m) for m in repo_map.models]
     route_cards = [_render_route_card(r) for r in repo_map.routes]
     telemetry_cards = [_render_telemetry_card(t) for t in repo_map.telemetry]
@@ -622,6 +660,7 @@ def _render_contracts_pane(repo_map: RepoMap) -> str:
             _render_contract_group("ADRs", "adrs", adr_cards),
         ]
     )
+    checklist_html = _render_edge_case_checklist(checklist) if checklist is not None else ""
 
     return (
         '<aside class="pane" aria-label="Codebase Contracts">'
@@ -636,11 +675,18 @@ def _render_contracts_pane(repo_map: RepoMap) -> str:
         f'<div id="contracts-empty" class="empty-state"{empty_hidden}>'
         "No matching codebase contracts found."
         "</div>"
+        f"{checklist_html}"
         "</aside>"
     )
 
 
-def render_split_pane_canvas(prd_md: str, repo_map: RepoMap, report: DriftReport) -> str:
+def render_split_pane_canvas(
+    prd_md: str,
+    repo_map: RepoMap,
+    report: DriftReport,
+    *,
+    checklist: EdgeCaseChecklist | None = None,
+) -> str:
     header_html = _render_header(report)
     left_pane = (
         '<section class="pane" aria-label="Living PRD">'
@@ -653,7 +699,7 @@ def render_split_pane_canvas(prd_md: str, repo_map: RepoMap, report: DriftReport
         "</div>"
         "</section>"
     )
-    right_pane = _render_contracts_pane(repo_map)
+    right_pane = _render_contracts_pane(repo_map, checklist=checklist)
 
     return (
         "<!DOCTYPE html>"
