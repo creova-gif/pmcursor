@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hmac
+import importlib
 import json
 import os
 from pathlib import Path
@@ -45,13 +46,13 @@ def _is_authorized(
     x_pmcursor_token: str,
 ) -> bool:
     expected_bytes = expected_token.encode("utf-8")
-    parts = authorization.strip().split(None, 1)
+    parts = authorization.strip(" \t").split(None, 1)
     bearer_token = (
-        parts[1].strip()
+        parts[1].strip(" \t")
         if len(parts) == 2 and parts[0].lower() == "bearer"
         else ""
     )
-    header_token = x_pmcursor_token.strip()
+    header_token = x_pmcursor_token.strip(" \t")
     return _token_matches(bearer_token, expected_bytes) or _token_matches(
         header_token, expected_bytes
     )
@@ -166,3 +167,9 @@ def create_app(
 
 
 app = create_app()
+
+
+def run_server(host: str = "127.0.0.1", port: int = 8000) -> None:
+    """Start the PMCursor FastAPI server using uvicorn."""
+    uvicorn_module: Any = importlib.import_module("uvicorn")
+    uvicorn_module.run(app, host=host, port=port)
