@@ -214,6 +214,15 @@ class RepoIndexCache:
     def __init__(self) -> None:
         self._entries: dict[Path, tuple[RepoFingerprint, RepoMap]] = {}
 
+    @property
+    def size(self) -> int:
+        """Return the number of cached repository entries."""
+        return len(self._entries)
+
+    def clear(self) -> None:
+        """Remove all cached repository entries."""
+        self._entries.clear()
+
     @staticmethod
     def _compute_fingerprint(repo_root: Path) -> RepoFingerprint:
         resolved_root = repo_root.resolve()

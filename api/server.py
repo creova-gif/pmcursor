@@ -3,12 +3,16 @@ from __future__ import annotations
 import hmac
 import importlib
 import json
+import logging
 import os
+import time
+import uuid
+from collections.abc import Awaitable, Callable
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 from urllib.parse import parse_qs
 
-from fastapi import FastAPI, Header, HTTPException
+from fastapi import FastAPI, Header, HTTPException, Response
 from fastapi.responses import HTMLResponse
 from pydantic import ValidationError
 
@@ -22,7 +26,6 @@ from api import (
     ReleaseNotesRequest,
     TelemetryVerifyRequest,
     TicketAuditRequest,
-    audit_prd_against_repo,
     compute_pr_impact,
     parse_jira_webhook_issue,
     parse_linear_webhook_issue,
@@ -37,7 +40,7 @@ from pmcursor.feature_flags import (
     audit_feature_flags_and_rollout,
     extract_feature_flags,
 )
-from pmcursor.indexer import index_repository
+from pmcursor.mcp_server import RepoIndexCache
 from pmcursor.models import DriftReport, PRImpactReport
 from pmcursor.release_notes import (
     ReleaseNotesReport,
@@ -57,6 +60,28 @@ if TYPE_CHECKING:
     WebhookRequest = FastAPIRequest[Any]
 else:
     from fastapi import Request as WebhookRequest
+
+MAX_WEBHOOK_BYTES = 2 * 1024 * 1024  # 2_097_152 bytes
+
+logger = logging.getLogger(__name__)
+
+
+async def _read_bounded_webhook_body(request: WebhookRequest) -> bytes:
+    raw_content_length = request.headers.get("content-length")
+    if raw_content_length is not None:
+        try:
+            if int(raw_content_length) > MAX_WEBHOOK_BYTES:
+                raise HTTPException(
+                    status_code=413, detail="Webhook payload exceeds 2MB limit"
+                )
+        except ValueError:
+            pass
+    body = await request.body()
+    if len(body) > MAX_WEBHOOK_BYTES:
+        raise HTTPException(
+            status_code=413, detail="Webhook payload exceeds 2MB limit"
+        )
+    return body
 
 
 def _token_matches(provided: str, expected_bytes: bytes) -> bool:
@@ -157,13 +182,44 @@ def create_app(
     jira_webhook_secret: str | None = None,
     allowed_workspace_root: Path | None = None,
     api_token: str | None = None,
+    repo_cache: RepoIndexCache | None = None,
 ) -> FastAPI:
     """Create and configure the PMCursor FastAPI application."""
     fastapi_app = FastAPI(title="PMCursor API")
+    cache = repo_cache if repo_cache is not None else RepoIndexCache()
+
+    @fastapi_app.middleware("http")
+    async def request_context_middleware(
+        request: WebhookRequest,
+        call_next: Callable[[WebhookRequest], Awaitable[Response]],
+    ) -> Response:
+        incoming_id = request.headers.get("x-request-id", "").strip()
+        request_id = incoming_id or str(uuid.uuid4())
+        start = time.perf_counter()
+        response = await call_next(request)
+        duration_ms = round((time.perf_counter() - start) * 1000.0, 2)
+        response.headers["X-Request-ID"] = request_id
+        response.headers["X-Process-Time-Ms"] = f"{duration_ms:.2f}"
+        logger.info(
+            json.dumps(
+                {
+                    "method": request.method,
+                    "path": request.url.path,
+                    "status_code": response.status_code,
+                    "duration_ms": duration_ms,
+                    "request_id": request_id,
+                }
+            )
+        )
+        return response
 
     @fastapi_app.get("/health")
     def health() -> dict[str, str]:
         return {"status": "ok"}
+
+    @fastapi_app.get("/readyz")
+    def readyz() -> dict[str, Any]:
+        return {"status": "ready", "cached_repos": cache.size}
 
     @fastapi_app.post("/v1/drift/audit")
     def drift_audit(
@@ -172,8 +228,14 @@ def create_app(
         x_pmcursor_token: str = Header(default="", alias="X-PMCursor-Token"),
     ) -> DriftReport:
         _require_auth(api_token, authorization, x_pmcursor_token)
-        _resolve_allowed_repo_root(body.repo_root, allowed_workspace_root)
-        return audit_prd_against_repo(body)
+        repo_path = _resolve_allowed_repo_root(body.repo_root, allowed_workspace_root)
+        repo_map = cache.get_or_index(repo_path)
+        return check_spec_drift(
+            body.prd_markdown,
+            repo_map,
+            prd_path=body.prd_path,
+            repo_root=repo_path,
+        )
 
     @fastapi_app.post("/v1/tickets/audit", response_model=TicketSyncReport)
     def tickets_audit(
@@ -183,7 +245,7 @@ def create_app(
     ) -> TicketSyncReport:
         _require_auth(api_token, authorization, x_pmcursor_token)
         repo_path = _resolve_allowed_repo_root(body.repo_root, allowed_workspace_root)
-        repo_map = index_repository(repo_path)
+        repo_map = cache.get_or_index(repo_path)
         return audit_ticket_against_repo(
             body.ticket_id,
             body.title,
@@ -201,7 +263,7 @@ def create_app(
     ) -> EdgeCaseChecklist:
         _require_auth(api_token, authorization, x_pmcursor_token)
         repo_path = _resolve_allowed_repo_root(body.repo_root, allowed_workspace_root)
-        repo_map = index_repository(repo_path)
+        repo_map = cache.get_or_index(repo_path)
         return generate_edge_case_checklist(
             repo_map,
             prd_markdown=body.prd_markdown,
@@ -216,7 +278,7 @@ def create_app(
     ) -> HTMLResponse:
         _require_auth(api_token, authorization, x_pmcursor_token)
         repo_path = _resolve_allowed_repo_root(body.repo_root, allowed_workspace_root)
-        repo_map = index_repository(repo_path)
+        repo_map = cache.get_or_index(repo_path)
         report = check_spec_drift(
             body.prd_markdown,
             repo_map,
@@ -234,7 +296,7 @@ def create_app(
     ) -> ReleaseNotesReport:
         _require_auth(api_token, authorization, x_pmcursor_token)
         repo_path = _resolve_allowed_repo_root(body.repo_root, allowed_workspace_root)
-        repo_map = index_repository(repo_path)
+        repo_map = cache.get_or_index(repo_path)
         return generate_release_notes_and_coverage(
             body.prd_markdown,
             body.diff_text,
@@ -262,7 +324,7 @@ def create_app(
     ) -> TelemetryVerificationReport:
         _require_auth(api_token, authorization, x_pmcursor_token)
         repo_path = _resolve_allowed_repo_root(body.repo_root, allowed_workspace_root)
-        repo_map = index_repository(repo_path)
+        repo_map = cache.get_or_index(repo_path)
         return verify_telemetry_samples(repo_map, body.events)
 
     @fastapi_app.get("/v1/dashboard", response_model=OrgDashboardSummary)
@@ -280,7 +342,7 @@ def create_app(
             if prd_file.is_relative_to(repo_path) and prd_file.is_file()
             else ""
         )
-        repo_map = index_repository(repo_path)
+        repo_map = cache.get_or_index(repo_path)
         flags = extract_feature_flags(repo_path)
         drift_report = check_spec_drift(
             prd_markdown,
@@ -312,7 +374,7 @@ def create_app(
         request: WebhookRequest,
         x_hub_signature_256: str = Header(default="", alias="X-Hub-Signature-256"),
     ) -> PRImpactReport | dict[str, Any]:
-        payload_body = await request.body()
+        payload_body = await _read_bounded_webhook_body(request)
         secret = (
             webhook_secret
             if webhook_secret is not None
@@ -347,7 +409,7 @@ def create_app(
                 and not root.is_relative_to(allowed_workspace_root.resolve())
             ):
                 raise PermissionError("Repository root outside allowed workspace")
-            repo_map = index_repository(root)
+            repo_map = cache.get_or_index(root)
             return compute_pr_impact(
                 payload.prd_markdown,
                 payload.diff_text,
@@ -365,7 +427,7 @@ def create_app(
         request: WebhookRequest,
         linear_signature: str = Header(default="", alias="Linear-Signature"),
     ) -> TicketSyncReport | dict[str, Any]:
-        payload_body = await request.body()
+        payload_body = await _read_bounded_webhook_body(request)
         secret = (
             linear_webhook_secret
             if linear_webhook_secret is not None
@@ -384,7 +446,7 @@ def create_app(
         if parsed is None:
             return {"status": "ignored", "event_type": data.get("type")}
         ticket_id, title, description = parsed
-        repo_map = index_repository(root)
+        repo_map = cache.get_or_index(root)
         return audit_ticket_against_repo(
             ticket_id,
             title,
@@ -401,7 +463,7 @@ def create_app(
         authorization: str = Header(default="", alias="Authorization"),
         x_pmcursor_token: str = Header(default="", alias="X-PMCursor-Token"),
     ) -> TicketSyncReport | dict[str, Any]:
-        payload_body = await request.body()
+        payload_body = await _read_bounded_webhook_body(request)
         jira_secret = (
             jira_webhook_secret
             if jira_webhook_secret is not None
@@ -423,7 +485,7 @@ def create_app(
         if parsed is None:
             return {"status": "ignored", "webhook_event": data.get("webhookEvent")}
         ticket_id, title, description = parsed
-        repo_map = index_repository(root)
+        repo_map = cache.get_or_index(root)
         return audit_ticket_against_repo(
             ticket_id,
             title,
