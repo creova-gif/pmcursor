@@ -12,9 +12,11 @@ REQUIRED_NON_EMPTY_FILES = (
     "README.md",
     "LICENSE",
     "CONTRIBUTING.md",
+    "SECURITY.md",
     "CHANGELOG.md",
     "Dockerfile",
     ".dockerignore",
+    ".github/workflows/release.yml",
     "docs/ROADMAP.md",
 )
 
