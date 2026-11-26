@@ -36,10 +36,13 @@ All notable changes to PMCursor are documented in this file.
 - Added [docs/API_REFERENCE.md](docs/API_REFERENCE.md) documenting FastAPI authentication, error codes, security headers, HTTP endpoints, and MCP stdio tools.
 - Added `run_performance_benchmark` in `evals/benchmark.py` for throughput and latency benchmarking.
 - Added `pmcursor_rate_limited_total` and `pmcursor_webhook_duplicates_total` Prometheus counters on `GET /metrics` in `api/server.py`.
+- Added `pytest-cov` with a `>= 80%` coverage gate (`--cov-fail-under=80`) in `.github/workflows/ci.yml`.
+- Added responsive mobile layout (`@media (max-width: 900px)`) and clear-filter UX in `web/canvas.py`.
 
 ### Changed
 
 - Extracted `build_parser` into `src/pmcursor/_cli_parser.py` for maintainability.
+- Modularized multi-stack contract indexing into `src/pmcursor/_multistack_indexer.py`.
 
 ### Accessibility
 

@@ -146,9 +146,18 @@ html, body {
   max-width: 1600px;
   margin: 0 auto;
 }
-@media (max-width: 960px) {
+@media (max-width: 900px) {
+  .canvas-header {
+    flex-direction: column;
+    align-items: flex-start;
+    padding: 14px 16px;
+  }
   .split-workspace {
     grid-template-columns: 1fr;
+    padding: 12px 16px 24px;
+  }
+  .pane {
+    padding: 16px;
   }
 }
 .pane {
@@ -249,8 +258,11 @@ html, body {
   position: relative;
   display: flex;
   align-items: center;
+  gap: 8px;
 }
 .search-input {
+  flex: 1;
+  min-width: 0;
   width: 100%;
   padding: 9px 36px 9px 12px;
   background: var(--card);
@@ -267,6 +279,33 @@ html, body {
   border-color: #60a5fa;
 }
 .search-input::placeholder { color: var(--muted); }
+.search-clear {
+  flex-shrink: 0;
+  padding: 7px 10px;
+  background: var(--pane);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: var(--text);
+  font-family: var(--sans);
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+}
+.search-clear:hover {
+  border-color: #525263;
+  background: var(--card);
+}
+.search-clear:focus-visible {
+  outline: 2px solid #60a5fa;
+  outline-offset: 2px;
+  border-color: #60a5fa;
+}
+.search-clear[hidden] {
+  display: none;
+}
+.search-bar:has(.search-clear:not([hidden])) .search-kbd {
+  display: none;
+}
 .search-kbd {
   position: absolute;
   right: 10px;
@@ -382,9 +421,16 @@ html, body {
 _SCRIPT = """
 (function () {
   var input = document.getElementById("contract-search");
+  var clearBtn = document.getElementById("contract-search-clear");
   var emptyState = document.getElementById("contracts-empty");
   var statusEl = document.getElementById("contract-filter-status");
   if (!input) { return; }
+
+  function syncClearButton() {
+    if (clearBtn) {
+      clearBtn.hidden = input.value.length === 0;
+    }
+  }
 
   function applyFilter() {
     var query = input.value.trim().toLowerCase();
@@ -421,9 +467,20 @@ _SCRIPT = """
       statusEl.textContent =
         "Showing " + totalVisible + " of " + totalCards + " indexed contracts";
     }
+    syncClearButton();
+  }
+
+  function clearFilter() {
+    input.value = "";
+    applyFilter();
+    input.focus();
   }
 
   input.addEventListener("input", applyFilter);
+  if (clearBtn) {
+    clearBtn.addEventListener("click", clearFilter);
+  }
+  syncClearButton();
   document.addEventListener("keydown", function (event) {
     var tag = document.activeElement ? document.activeElement.tagName : "";
     var isEditable = document.activeElement && document.activeElement.isContentEditable;
@@ -432,9 +489,7 @@ _SCRIPT = """
       input.focus();
       input.select();
     } else if (event.key === "Escape" && document.activeElement === input) {
-      input.value = "";
-      applyFilter();
-      input.blur();
+      clearFilter();
     }
   });
 })();
@@ -709,6 +764,8 @@ def _render_contracts_pane(
         'placeholder="Filter models, routes, telemetry, ADRs..." '
         'aria-label="Filter indexed contracts" '
         'aria-describedby="contract-filter-status" />'
+        '<button id="contract-search-clear" class="search-clear" type="button" '
+        'aria-label="Clear contract filter" hidden>Clear</button>'
         '<span class="search-kbd" aria-hidden="true">/</span>'
         "</div>"
         f'<div id="contract-filter-status" class="contract-count" aria-live="polite">'
