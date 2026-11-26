@@ -11,6 +11,9 @@ All notable changes to PMCursor are documented in this file.
 - Added the codebase-cited edge-case checklist generator in `src/pmcursor/checklists.py` with the `pmcursor checklist` CLI subcommand.
 - Added `/v1/tickets/audit`, `/v1/checklist`, and `/v1/canvas` endpoints to the FastAPI server.
 - Added `POST /v1/webhooks/linear`, `POST /v1/webhooks/jira`, `verify_linear_signature`, `verify_jira_signature`, and top-level `pmcursor` package exports (`audit_ticket_against_repo`, `generate_edge_case_checklist`).
+- Added Prisma (`.prisma`) and GraphQL (`.graphql`/`.gql`) contract indexing in `src/pmcursor/indexer.py`.
+- Added `step-summary` and `checklist` inputs to `.github/actions/pmcursor-drift/action.yml` to publish Markdown drift reports and edge-case checklists to GitHub Step Summary.
+- Added optional `EdgeCaseChecklist` rendering in `render_split_pane_canvas` (`web/canvas.py`) with HTML escaping for all checklist fields.
 
 ### Security & Hardening
 

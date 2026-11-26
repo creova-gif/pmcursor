@@ -1,6 +1,6 @@
 # PMCursor
 
-PMCursor checks product requirements documents against repositories. It indexes Pydantic models, Zod schemas, FastAPI routes, Next.js App Router routes, OpenAPI specs, SQL DDL tables, and architecture decision records. It also indexes telemetry events for PostHog, Vercel Analytics, Langfuse, and BigQuery, then flags contract drift and fabricated `file:line` citations.
+PMCursor checks product requirements documents against repositories. It indexes Pydantic models, Zod schemas, Prisma schemas (`.prisma`), GraphQL schemas (`.graphql`/`.gql`), FastAPI routes, Next.js App Router routes, OpenAPI specs, SQL DDL tables, and architecture decision records. It also indexes telemetry events for PostHog, Vercel Analytics, Langfuse, and BigQuery, then flags contract drift and fabricated `file:line` citations.
 
 ## Architecture and adapted patterns
 
@@ -33,7 +33,7 @@ PMCursor adapts plugin packaging and CLI conventions from [`cursor/plugins`](htt
 	```bash
 	PYTHONPATH=src python3 -m pmcursor.cli pr-impact --prd PROJECT_SPEC.md --repo . --base main
 	```
-5. Generate an interactive split-pane HTML spec canvas.
+5. Generate an interactive split-pane HTML spec canvas (supports an optional `EdgeCaseChecklist` inspector pane in `web/canvas.py`).
 	```bash
 	PYTHONPATH=src python3 -m pmcursor.cli canvas --prd PROJECT_SPEC.md --repo . --output canvas.html
 	```
@@ -87,7 +87,7 @@ pip install 'pmcursor[server]'
 
 ### Composite GitHub Action
 
-Use [.github/actions/pmcursor-drift/action.yml](.github/actions/pmcursor-drift/action.yml) in CI workflows to run automated drift and PR impact checks on pull requests.
+Use [.github/actions/pmcursor-drift/action.yml](.github/actions/pmcursor-drift/action.yml) in CI workflows to run automated drift and PR impact checks on pull requests. It supports `step-summary` (default `"true"`) to write the Markdown drift report to `GITHUB_STEP_SUMMARY` and `checklist` (default `"false"`) to append a codebase-cited edge-case checklist.
 
 ## Evaluation results
 

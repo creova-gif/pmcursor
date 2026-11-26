@@ -977,6 +977,257 @@ def _extract_sql_telemetry(source: str, rel_path: str) -> list[TelemetryContract
     return sorted(events, key=lambda t: (t.file_path, t.line))
 
 
+PRISMA_MODEL_RE = re.compile(r"^model\s+([A-Za-z_]\w*)\s*\{")
+GRAPHQL_BLOCK_RE = re.compile(r"^(type|input)\s+([A-Za-z_]\w*)\b[^{]*\{")
+GRAPHQL_FIELD_RE = re.compile(r"^([A-Za-z_]\w*)\s*(?:\(([^)]*)\))?\s*:\s*(.+)$")
+
+
+def _strip_line_comment(line: str, prefix: str) -> str:
+    """Strip a line comment starting with `prefix` outside quoted strings."""
+    in_quote: str | None = None
+    escaped = False
+    for idx, ch in enumerate(line):
+        if escaped:
+            escaped = False
+            continue
+        if ch == "\\" and in_quote is not None:
+            escaped = True
+            continue
+        if ch in {'"', "'"}:
+            if in_quote is None:
+                in_quote = ch
+            elif in_quote == ch:
+                in_quote = None
+            continue
+        if in_quote is None and line.startswith(prefix, idx):
+            return line[:idx]
+    return line
+
+
+def _extract_prisma_models(source: str, rel_path: str) -> list[ModelContract]:
+    """Extract `ModelContract` definitions from a Prisma schema file."""
+    models: list[ModelContract] = []
+    current_model: str | None = None
+    start_line = 1
+    brace_depth = 0
+    fields: list[FieldContract] = []
+
+    for line_no, raw_line in enumerate(source.splitlines(), start=1):
+        cleaned = _strip_line_comment(raw_line, "//").strip()
+        if current_model is None:
+            if not cleaned:
+                continue
+            match = PRISMA_MODEL_RE.match(cleaned)
+            if not match:
+                continue
+            current_model = match.group(1)
+            start_line = line_no
+            fields = []
+            brace_depth = cleaned.count("{") - cleaned.count("}")
+            if brace_depth <= 0:
+                models.append(
+                    ModelContract(
+                        name=current_model,
+                        file_path=rel_path,
+                        line=start_line,
+                        base_classes=["PrismaModel"],
+                        fields=fields,
+                    )
+                )
+                current_model = None
+            continue
+
+        brace_depth += cleaned.count("{") - cleaned.count("}")
+        if brace_depth <= 0:
+            models.append(
+                ModelContract(
+                    name=current_model,
+                    file_path=rel_path,
+                    line=start_line,
+                    base_classes=["PrismaModel"],
+                    fields=fields,
+                )
+            )
+            current_model = None
+            fields = []
+            brace_depth = 0
+            continue
+
+        if not cleaned or cleaned.startswith("@@"):
+            continue
+
+        parts = cleaned.split()
+        if len(parts) < 2:
+            continue
+        field_name, raw_type = parts[0], parts[1]
+        if not re.fullmatch(r"[A-Za-z_]\w*", field_name):
+            continue
+        fields.append(
+            FieldContract(
+                name=field_name,
+                type_annotation=raw_type,
+                required=not raw_type.endswith("?"),
+                line=line_no,
+            )
+        )
+
+    return sorted(models, key=lambda m: (m.file_path, m.line))
+
+
+def _clean_graphql_type_name(raw_type: str) -> str:
+    """Strip GraphQL list/non-null wrappers and default values to get the base type name."""
+    base = raw_type.split("=", 1)[0].strip()
+    return re.sub(r"[\[\]!]", "", base).strip()
+
+
+def _extract_graphql_request_model(args_str: str | None) -> str | None:
+    if not args_str:
+        return None
+    arg_types: list[tuple[str, str]] = []
+    for part in args_str.split(","):
+        if ":" not in part:
+            continue
+        arg_name, arg_type = part.split(":", 1)
+        cleaned_type = _clean_graphql_type_name(arg_type)
+        if cleaned_type:
+            arg_types.append((arg_name.strip(), cleaned_type))
+    if not arg_types:
+        return None
+    for arg_name, arg_type in arg_types:
+        if arg_name == "input":
+            return arg_type
+    return arg_types[0][1]
+
+
+def _extract_graphql_contracts(
+    source: str, rel_path: str
+) -> tuple[list[ModelContract], list[RouteContract]]:
+    """Extract `ModelContract` and `RouteContract` definitions from a GraphQL SDL file."""
+    models: list[ModelContract] = []
+    routes: list[RouteContract] = []
+
+    current_kind: str | None = None
+    current_name: str | None = None
+    start_line = 1
+    brace_depth = 0
+    fields: list[FieldContract] = []
+    pending_line = ""
+    pending_line_no = 1
+    in_docstring = False
+
+    for line_no, raw_line in enumerate(source.splitlines(), start=1):
+        stripped_raw = raw_line.strip()
+        if '"""' in stripped_raw:
+            quote_count = stripped_raw.count('"""')
+            if quote_count % 2 == 1:
+                in_docstring = not in_docstring
+            continue
+        if in_docstring:
+            continue
+
+        cleaned = _strip_line_comment(raw_line, "#").strip()
+        if current_name is None:
+            if not cleaned:
+                continue
+            match = GRAPHQL_BLOCK_RE.match(cleaned)
+            if not match:
+                continue
+            current_kind = match.group(1)
+            current_name = match.group(2)
+            start_line = line_no
+            fields = []
+            pending_line = ""
+            brace_depth = cleaned.count("{") - cleaned.count("}")
+            if brace_depth <= 0:
+                if current_name not in {"Query", "Mutation"}:
+                    models.append(
+                        ModelContract(
+                            name=current_name,
+                            file_path=rel_path,
+                            line=start_line,
+                            base_classes=[
+                                "GraphQLInput" if current_kind == "input" else "GraphQLType"
+                            ],
+                            fields=fields,
+                        )
+                    )
+                current_name = None
+                current_kind = None
+            continue
+
+        brace_depth += cleaned.count("{") - cleaned.count("}")
+        if brace_depth <= 0:
+            if current_name not in {"Query", "Mutation"}:
+                models.append(
+                    ModelContract(
+                        name=current_name,
+                        file_path=rel_path,
+                        line=start_line,
+                        base_classes=[
+                            "GraphQLInput" if current_kind == "input" else "GraphQLType"
+                        ],
+                        fields=fields,
+                    )
+                )
+            current_name = None
+            current_kind = None
+            fields = []
+            pending_line = ""
+            brace_depth = 0
+            continue
+
+        if not cleaned:
+            continue
+
+        if pending_line:
+            candidate = f"{pending_line} {cleaned}"
+            candidate_line = pending_line_no
+        else:
+            candidate = cleaned
+            candidate_line = line_no
+
+        if candidate.count("(") > candidate.count(")"):
+            pending_line = candidate
+            pending_line_no = candidate_line
+            continue
+        pending_line = ""
+
+        field_match = GRAPHQL_FIELD_RE.match(candidate)
+        if not field_match:
+            continue
+
+        field_name = field_match.group(1)
+        args_str = field_match.group(2)
+        raw_type = field_match.group(3).strip()
+
+        if current_kind == "type" and current_name in {"Query", "Mutation"}:
+            routes.append(
+                RouteContract(
+                    method="QUERY" if current_name == "Query" else "MUTATION",
+                    path=f"/{field_name}",
+                    function_name=field_name,
+                    file_path=rel_path,
+                    line=candidate_line,
+                    request_model=_extract_graphql_request_model(args_str),
+                    response_model=_clean_graphql_type_name(raw_type) or None,
+                )
+            )
+        else:
+            fields.append(
+                FieldContract(
+                    name=field_name,
+                    type_annotation=raw_type,
+                    required=raw_type.endswith("!"),
+                    line=candidate_line,
+                )
+            )
+
+    return (
+        sorted(models, key=lambda m: (m.file_path, m.line)),
+        sorted(routes, key=lambda r: (r.file_path, r.line)),
+    )
+
+
 def _extract_adr(file_path: Path, rel_path: str) -> ADRContract | None:
     try:
         lines = file_path.read_text(encoding="utf-8").splitlines()
@@ -1070,6 +1321,20 @@ def index_repository(repo_root: Path) -> RepoMap:
                 continue
             models.extend(_extract_sql_models(source, rel_path))
             telemetry.extend(_extract_sql_telemetry(source, rel_path))
+        elif path.suffix == ".prisma":
+            try:
+                source = path.read_text(encoding="utf-8")
+            except (OSError, UnicodeDecodeError):
+                continue
+            models.extend(_extract_prisma_models(source, rel_path))
+        elif path.suffix in {".graphql", ".gql"}:
+            try:
+                source = path.read_text(encoding="utf-8")
+            except (OSError, UnicodeDecodeError):
+                continue
+            gql_models, gql_routes = _extract_graphql_contracts(source, rel_path)
+            models.extend(gql_models)
+            routes.extend(gql_routes)
         elif (
             path.suffix == ".md"
             and len(rel_parts) >= 2

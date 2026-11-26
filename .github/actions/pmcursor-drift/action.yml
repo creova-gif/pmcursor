@@ -17,6 +17,19 @@ inputs:
     description: "Python version to install"
     required: false
     default: "3.12"
+  step-summary:
+    description: "Write Markdown drift report to GitHub Step Summary"
+    required: false
+    default: "true"
+  checklist:
+    description: "Include codebase-cited edge-case checklist in Step Summary"
+    required: false
+    default: "false"
+
+outputs:
+  exit-code:
+    description: "Exit code from pmcursor drift"
+    value: ${{ steps.drift.outputs.exit_code }}
 
 runs:
   using: "composite"
@@ -32,15 +45,33 @@ runs:
         ACTION_PATH: ${{ github.action_path }}
       run: pip install --no-cache-dir "$ACTION_PATH/../../.."
 
-    - name: Run PMCursor drift check
+    - id: drift
+      name: Run PMCursor drift check
       shell: bash
       env:
         INPUT_PRD: ${{ inputs.prd }}
         INPUT_REPO: ${{ inputs.repo }}
         INPUT_FAIL_ON_DRIFT: ${{ inputs.fail-on-drift }}
+        INPUT_STEP_SUMMARY: ${{ inputs.step-summary }}
+        INPUT_CHECKLIST: ${{ inputs.checklist }}
       run: |
         ARGS=(drift --prd "$INPUT_PRD" --repo "$INPUT_REPO" --md)
         if [ "$INPUT_FAIL_ON_DRIFT" = "true" ]; then
           ARGS+=(--fail-on-drift)
         fi
-        pmcursor "${ARGS[@]}"
+        set +e
+        REPORT="$(pmcursor "${ARGS[@]}")"
+        EXIT_CODE=$?
+        set -e
+        printf '%s\n' "$REPORT"
+        if [ "$INPUT_STEP_SUMMARY" = "true" ] && [ -n "${GITHUB_STEP_SUMMARY:-}" ]; then
+          printf '%s\n' "$REPORT" >> "$GITHUB_STEP_SUMMARY"
+          if [ "$INPUT_CHECKLIST" = "true" ]; then
+            printf '\n' >> "$GITHUB_STEP_SUMMARY"
+            pmcursor checklist --repo "$INPUT_REPO" --prd "$INPUT_PRD" >> "$GITHUB_STEP_SUMMARY" || true
+          fi
+        fi
+        if [ -n "${GITHUB_OUTPUT:-}" ]; then
+          echo "exit_code=$EXIT_CODE" >> "$GITHUB_OUTPUT"
+        fi
+        exit "$EXIT_CODE"
