@@ -17,6 +17,10 @@ Checks a PRD or spec against the repository's AST contracts to catch schema mism
    ```bash
    python3 -m pmcursor.cli drift --prd <path-to-prd.md> --repo . --json --fail-on-drift
    ```
+   To audit Linear or Jira ticket specs against the `RepoMap` alongside PRD drift checks, run `pmcursor ticket-sync`:
+   ```bash
+   python3 -m pmcursor.cli ticket-sync --id <TICKET-ID> --title "<Title>" --body-file <ticket.md> --repo .
+   ```
 
 2. Review findings by category:
    - `fabricated_citation`: A `path/to/file.py:line` reference where the file is missing or the line number exceeds the file length.

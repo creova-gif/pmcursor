@@ -10,6 +10,7 @@ All notable changes to PMCursor are documented in this file.
 - Added Linear and Jira ticket auditing in `src/pmcursor/tickets.py` with the `pmcursor ticket-sync` CLI subcommand and `pmcursor serve` to launch the API server.
 - Added the codebase-cited edge-case checklist generator in `src/pmcursor/checklists.py` with the `pmcursor checklist` CLI subcommand.
 - Added `/v1/tickets/audit`, `/v1/checklist`, and `/v1/canvas` endpoints to the FastAPI server.
+- Added `POST /v1/webhooks/linear`, `POST /v1/webhooks/jira`, `verify_linear_signature`, `verify_jira_signature`, and top-level `pmcursor` package exports (`audit_ticket_against_repo`, `generate_edge_case_checklist`).
 
 ### Security & Hardening
 

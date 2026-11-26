@@ -20,7 +20,11 @@ from api import (
     TicketAuditRequest,
     audit_prd_against_repo,
     compute_pr_impact,
+    parse_jira_webhook_issue,
+    parse_linear_webhook_issue,
     verify_github_signature,
+    verify_jira_signature,
+    verify_linear_signature,
 )
 from pmcursor.checklists import EdgeCaseChecklist, generate_edge_case_checklist
 from pmcursor.drift import check_spec_drift
@@ -111,9 +115,28 @@ def _resolve_allowed_repo_root(
     return repo_path
 
 
+def _parse_webhook_dict_and_repo(
+    payload_body: bytes,
+    content_type: str,
+    allowed_workspace_root: Path | None,
+) -> tuple[dict[str, Any], Path]:
+    try:
+        data = _decode_webhook_json(payload_body, content_type)
+    except (UnicodeDecodeError, json.JSONDecodeError, ValueError) as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    if not isinstance(data, dict):
+        raise HTTPException(status_code=422, detail="Webhook payload must be a JSON object")
+    raw_repo_root = data.get("repo_root", ".")
+    repo_root = raw_repo_root if isinstance(raw_repo_root, str) else "."
+    root = _resolve_allowed_repo_root(repo_root, allowed_workspace_root)
+    return data, root
+
+
 def create_app(
     *,
     webhook_secret: str | None = None,
+    linear_webhook_secret: str | None = None,
+    jira_webhook_secret: str | None = None,
     allowed_workspace_root: Path | None = None,
     api_token: str | None = None,
 ) -> FastAPI:
@@ -237,6 +260,79 @@ def create_app(
             raise HTTPException(status_code=422, detail=str(exc)) from exc
         except PermissionError as exc:
             raise HTTPException(status_code=401, detail=str(exc)) from exc
+
+    @fastapi_app.post("/v1/webhooks/linear", response_model=None)
+    async def linear_webhook(
+        request: WebhookRequest,
+        linear_signature: str = Header(default="", alias="Linear-Signature"),
+    ) -> TicketSyncReport | dict[str, Any]:
+        payload_body = await request.body()
+        secret = (
+            linear_webhook_secret
+            if linear_webhook_secret is not None
+            else os.environ.get("PMCURSOR_LINEAR_WEBHOOK_SECRET", "")
+        )
+        if not verify_linear_signature(payload_body, linear_signature, secret):
+            raise HTTPException(
+                status_code=401, detail="Invalid Linear webhook signature"
+            )
+        data, root = _parse_webhook_dict_and_repo(
+            payload_body,
+            request.headers.get("content-type", ""),
+            allowed_workspace_root,
+        )
+        parsed = parse_linear_webhook_issue(data)
+        if parsed is None:
+            return {"status": "ignored", "event_type": data.get("type")}
+        ticket_id, title, description = parsed
+        repo_map = index_repository(root)
+        return audit_ticket_against_repo(
+            ticket_id,
+            title,
+            description,
+            repo_map,
+            provider="linear",
+            repo_root=root,
+        )
+
+    @fastapi_app.post("/v1/webhooks/jira", response_model=None)
+    async def jira_webhook(
+        request: WebhookRequest,
+        x_hub_signature: str = Header(default="", alias="X-Hub-Signature"),
+        authorization: str = Header(default="", alias="Authorization"),
+        x_pmcursor_token: str = Header(default="", alias="X-PMCursor-Token"),
+    ) -> TicketSyncReport | dict[str, Any]:
+        payload_body = await request.body()
+        jira_secret = (
+            jira_webhook_secret
+            if jira_webhook_secret is not None
+            else os.environ.get("PMCURSOR_JIRA_WEBHOOK_SECRET", "")
+        )
+        if jira_secret:
+            if not verify_jira_signature(payload_body, x_hub_signature, jira_secret):
+                raise HTTPException(
+                    status_code=401, detail="Invalid Jira webhook signature"
+                )
+        else:
+            _require_auth(api_token, authorization, x_pmcursor_token)
+        data, root = _parse_webhook_dict_and_repo(
+            payload_body,
+            request.headers.get("content-type", ""),
+            allowed_workspace_root,
+        )
+        parsed = parse_jira_webhook_issue(data)
+        if parsed is None:
+            return {"status": "ignored", "webhook_event": data.get("webhookEvent")}
+        ticket_id, title, description = parsed
+        repo_map = index_repository(root)
+        return audit_ticket_against_repo(
+            ticket_id,
+            title,
+            description,
+            repo_map,
+            provider="jira",
+            repo_root=root,
+        )
 
     return fastapi_app
 

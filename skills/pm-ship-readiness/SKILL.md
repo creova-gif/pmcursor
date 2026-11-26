@@ -15,6 +15,15 @@ python3 -m pmcursor.cli eval --json && \
 pytest
 ```
 
+## QA checklist & ticket sync
+
+Generate a codebase-cited edge-case QA checklist and audit sprint tickets before release:
+
+```bash
+PYTHONPATH=src python3 -m pmcursor.cli checklist --repo . --prd PROJECT_SPEC.md
+PYTHONPATH=src python3 -m pmcursor.cli ticket-sync --id <TICKET-ID> --title "<Title>" --body-file <ticket.md> --repo .
+```
+
 ## Checklist
 
 1. Plugin manifest gate: `.cursor-plugin/plugin.json` and `.claude-plugin/plugin.json` exist, versions match `pyproject.toml`, and all declared component directories (`./skills/`, `./agents/`, `./rules/`) contain files with valid YAML frontmatter.
