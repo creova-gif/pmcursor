@@ -23,6 +23,7 @@ All notable changes to PMCursor are documented in this file.
 - Added the project milestone roadmap in `docs/ROADMAP.md` (`M1`–`M16` completed), `CONTRIBUTING.md`, and GitHub issue/PR templates under `.github/`.
 - Added `GET /readyz` readiness probe (reporting cached repository count) and `X-Request-ID` / `X-Process-Time-Ms` observability middleware in `api/server.py`.
 - Added production container packaging (`Dockerfile`, `.dockerignore`), [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md), and a Python `3.11`/`3.12` CI test matrix in `.github/workflows/ci.yml`.
+- Added the `pmcursor doctor` diagnostic CLI subcommand in `src/pmcursor/cli.py` (with `--repo` and `--json`, reporting Python version, server extra availability, plugin manifest validity, and boolean secret configuration status without printing secret values).
 
 ### Performance
 

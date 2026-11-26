@@ -206,6 +206,8 @@ def test_mcp_server_protocol_and_tools_over_stdio(tmp_path: Path) -> None:
         "pmcursor_checklist",
         "pmcursor_ticket_sync",
         "pmcursor_release_notes",
+        "pmcursor_flags",
+        "pmcursor_telemetry_verify",
     ]
 
     for call_id in (4, 5, 6, 7, 8):
@@ -319,3 +321,128 @@ def test_mcp_server_missing_repo_dir_returns_is_error(tmp_path: Path) -> None:
     assert resp["result"]["isError"] is True
     err_body = json.loads(resp["result"]["content"][0]["text"])
     assert err_body["error_type"] == "FileNotFoundError"
+
+
+def test_repo_index_cache_lru_eviction_and_metrics(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    with pytest.raises(ValueError, match="max_entries"):
+        RepoIndexCache(max_entries=0)
+
+    repo_a = tmp_path / "repo_a"
+    repo_b = tmp_path / "repo_b"
+    repo_c = tmp_path / "repo_c"
+    for repo_dir in (repo_a, repo_b, repo_c):
+        (repo_dir / "src").mkdir(parents=True)
+        (repo_dir / "src" / "app.py").write_text("x = 1\n", encoding="utf-8")
+
+    indexed_paths: list[Path] = []
+
+    def spy_index_repository(repo_root: Path) -> RepoMap:
+        indexed_paths.append(repo_root)
+        return index_repository(repo_root)
+
+    monkeypatch.setattr(mcp_server_module, "index_repository", spy_index_repository)
+
+    cache = RepoIndexCache(max_entries=2)
+    assert cache.hits == 0
+    assert cache.misses == 0
+
+    map_a1 = cache.get_or_index(repo_a)
+    assert cache.misses == 1
+    assert cache.hits == 0
+    assert cache.size == 1
+
+    _ = cache.get_or_index(repo_b)
+    assert cache.misses == 2
+    assert cache.hits == 0
+    assert cache.size == 2
+
+    # Touch repo_a so repo_b becomes the least-recently-used entry.
+    map_a2 = cache.get_or_index(repo_a)
+    assert map_a2 is map_a1
+    assert cache.hits == 1
+    assert cache.misses == 2
+
+    # Indexing repo_c should evict repo_b, keeping repo_a and repo_c.
+    _ = cache.get_or_index(repo_c)
+    assert cache.size == 2
+    assert cache.misses == 3
+    assert cache.hits == 1
+
+    # repo_a is still cached (hit); repo_b was evicted (miss).
+    assert cache.get_or_index(repo_a) is map_a1
+    assert cache.hits == 2
+    assert cache.misses == 3
+
+    _ = cache.get_or_index(repo_b)
+    assert cache.misses == 4
+    assert cache.size == 2
+    assert indexed_paths == [
+        repo_a.resolve(),
+        repo_b.resolve(),
+        repo_c.resolve(),
+        repo_b.resolve(),
+    ]
+
+
+def test_mcp_server_flags_and_telemetry_verify_tools(tmp_path: Path) -> None:
+    repo = _build_sample_repo(tmp_path)
+    (repo / "src" / "flags.py").write_text(
+        "def check_widget_flag() -> bool:\n"
+        "    return is_enabled('enable_widget_v2')\n",
+        encoding="utf-8",
+    )
+    (repo / "src" / "analytics.py").write_text(
+        "def track_widget_viewed(widget_id: str) -> None:\n"
+        "    track_event('widget_viewed', {'widget_id': widget_id, 'source': 'web'})\n",
+        encoding="utf-8",
+    )
+
+    prd_with_flag = _sample_prd() + "\n## Feature Flags\n- `enable_widget_v2`\n"
+
+    server = PMCursorMCPServer(allowed_workspace_root=tmp_path)
+
+    flags_resp = server.handle_request(
+        {
+            "jsonrpc": "2.0",
+            "id": 20,
+            "method": "tools/call",
+            "params": {
+                "name": "pmcursor_flags",
+                "arguments": {"repo_root": str(repo), "prd_markdown": prd_with_flag},
+            },
+        }
+    )
+    assert flags_resp is not None
+    assert flags_resp["result"]["isError"] is False
+    flags_payload = json.loads(flags_resp["result"]["content"][0]["text"])
+    assert "enable_widget_v2" in flags_payload["referenced_flags"]
+    assert flags_payload["rollback_ready"] is True
+
+    telemetry_resp = server.handle_request(
+        {
+            "jsonrpc": "2.0",
+            "id": 21,
+            "method": "tools/call",
+            "params": {
+                "name": "pmcursor_telemetry_verify",
+                "arguments": {
+                    "repo_root": str(repo),
+                    "events": [
+                        {
+                            "event_name": "widget_viewed",
+                            "properties": {"widget_id": "w-1", "source": "web"},
+                        }
+                    ],
+                },
+            },
+        }
+    )
+    assert telemetry_resp is not None
+    assert telemetry_resp["result"]["isError"] is False
+    telemetry_payload = json.loads(telemetry_resp["result"]["content"][0]["text"])
+    assert telemetry_payload["matched_events"] == 1
+    assert telemetry_payload["total_code_events"] == 1
+    assert telemetry_payload["items"][0]["status"] == "matched"

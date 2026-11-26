@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
+import platform
 import subprocess
 import sys
 from collections.abc import Callable, Sequence
@@ -49,6 +51,7 @@ CLI_EPILOG = """Examples:
   python3 -m pmcursor.cli serve --host 127.0.0.1 --port 8000
   python3 -m pmcursor.cli mcp
   python3 -m pmcursor.cli validate-plugin --repo .
+  python3 -m pmcursor.cli doctor --repo .
   python3 -m pmcursor.cli eval --json
 """
 
@@ -519,6 +522,24 @@ def build_parser() -> argparse.ArgumentParser:
         help="Emit JSON OrgDashboardSummary",
     )
 
+    doctor_parser = subparsers.add_parser(
+        "doctor",
+        help="Run environment, plugin, and configuration diagnostics.",
+        epilog="Examples:\n  python3 -m pmcursor.cli doctor --repo .\n  python3 -m pmcursor.cli doctor --repo . --json",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
+    doctor_parser.add_argument(
+        "--repo",
+        type=Path,
+        default=Path("."),
+        help="Repository root directory to inspect (default: .)",
+    )
+    doctor_parser.add_argument(
+        "--json",
+        action="store_true",
+        help="Emit JSON diagnostic report",
+    )
+
     return parser
 
 
@@ -571,6 +592,68 @@ def _load_telemetry_events(events_file: Path) -> list[dict[str, Any]]:
             raise TypeError("Each NDJSON line must be a JSON object.")
         events.append(item)
     return events
+
+
+def _run_doctor(repo_path: Path, *, emit_json: bool) -> int:
+    """Collect and print environment, plugin, and secret-presence diagnostics."""
+    if not repo_path.is_dir():
+        print(
+            f"Error: Repository directory '{repo_path}' does not exist.\n"
+            "  Try: python3 -m pmcursor.cli doctor --repo .",
+            file=sys.stderr,
+        )
+        return 2
+
+    plugin_valid = validate_plugin_manifests(repo_path).valid
+    checks: dict[str, str | bool] = {
+        "python_version": platform.python_version(),
+        "server_extra_available": _run_server is not None,
+        "plugin_valid": plugin_valid,
+        "api_token_configured": bool(os.environ.get("PMCURSOR_API_TOKEN", "").strip()),
+        "github_webhook_secret_configured": bool(
+            os.environ.get("PMCURSOR_WEBHOOK_SECRET", "").strip()
+        ),
+        "linear_webhook_secret_configured": bool(
+            os.environ.get("PMCURSOR_LINEAR_WEBHOOK_SECRET", "").strip()
+        ),
+        "jira_webhook_secret_configured": bool(
+            os.environ.get("PMCURSOR_JIRA_WEBHOOK_SECRET", "").strip()
+        ),
+    }
+
+    if emit_json:
+        print(json.dumps(checks, indent=2))
+    else:
+        rows = [
+            ("python_version", str(checks["python_version"])),
+            (
+                "server_extra_available",
+                "available" if checks["server_extra_available"] else "unavailable",
+            ),
+            ("plugin_valid", "valid" if checks["plugin_valid"] else "invalid"),
+            (
+                "api_token_configured",
+                "configured" if checks["api_token_configured"] else "unset",
+            ),
+            (
+                "github_webhook_secret_configured",
+                "configured" if checks["github_webhook_secret_configured"] else "unset",
+            ),
+            (
+                "linear_webhook_secret_configured",
+                "configured" if checks["linear_webhook_secret_configured"] else "unset",
+            ),
+            (
+                "jira_webhook_secret_configured",
+                "configured" if checks["jira_webhook_secret_configured"] else "unset",
+            ),
+        ]
+        width = max(len(key) for key, _ in rows)
+        print("PMCursor Doctor")
+        for key, value in rows:
+            print(f"  {key:<{width}} : {value}")
+
+    return 0 if plugin_valid else 1
 
 
 def main(argv: Sequence[str] | None = None) -> int:
@@ -1079,6 +1162,9 @@ def main(argv: Sequence[str] | None = None) -> int:
                 )
             )
         return 0
+
+    if args.command == "doctor":
+        return _run_doctor(args.repo, emit_json=args.json)
 
     return 2
 
