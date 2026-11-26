@@ -15,6 +15,7 @@ from typing import TYPE_CHECKING, Any
 from urllib.parse import parse_qs
 
 from fastapi import FastAPI, Header, HTTPException, Response
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse, JSONResponse, PlainTextResponse
 from pydantic import ValidationError
 
@@ -269,6 +270,7 @@ def create_app(
     repo_cache: RepoIndexCache | None = None,
     rate_limit_per_minute: int | None = None,
     trust_proxy: bool | None = None,
+    cors_origins: list[str] | None = None,
 ) -> FastAPI:
     """Create and configure the PMCursor FastAPI application."""
     fastapi_app = FastAPI(title="PMCursor API")
@@ -280,12 +282,34 @@ def create_app(
         else os.environ.get("PMCURSOR_TRUST_PROXY", "").strip().lower()
         in {"1", "true", "yes"}
     )
+    raw_cors_origins = (
+        cors_origins
+        if cors_origins is not None
+        else os.environ.get("PMCURSOR_CORS_ORIGINS", "").split(",")
+    )
+    effective_cors_origins = [
+        origin.strip() for origin in raw_cors_origins if origin.strip()
+    ]
+    if effective_cors_origins:
+        fastapi_app.add_middleware(
+            CORSMiddleware,
+            allow_origins=effective_cors_origins,
+            allow_credentials=False,
+            allow_methods=["GET", "POST", "OPTIONS"],
+            allow_headers=[
+                "Authorization",
+                "Content-Type",
+                "X-PMCursor-Token",
+                "X-Request-ID",
+            ],
+        )
     rate_limiter = (
         _SlidingWindowRateLimiter(effective_rate_limit)
         if effective_rate_limit is not None
         else None
     )
     delivery_deduplicator = _DeliveryDeduplicator()
+    metrics_lock = threading.Lock()
     total_requests = 0
     error_requests = 0
 
@@ -340,9 +364,10 @@ def create_app(
             else:
                 response = await call_next(request)
 
-        total_requests += 1
-        if response.status_code >= 400:
-            error_requests += 1
+        with metrics_lock:
+            total_requests += 1
+            if response.status_code >= 400:
+                error_requests += 1
         duration_ms = round((time.perf_counter() - start) * 1000.0, 2)
         response.headers["X-Request-ID"] = request_id
         response.headers["X-Process-Time-Ms"] = f"{duration_ms:.2f}"
@@ -372,15 +397,18 @@ def create_app(
 
     @fastapi_app.get("/metrics", response_class=PlainTextResponse)
     def metrics() -> PlainTextResponse:
+        with metrics_lock:
+            current_total_requests = total_requests
+            current_error_requests = error_requests
         cache_hits = int(getattr(cache, "hits", 0))
         cache_misses = int(getattr(cache, "misses", 0))
         lines = [
             "# HELP pmcursor_http_requests_total Total HTTP requests processed.",
             "# TYPE pmcursor_http_requests_total counter",
-            f"pmcursor_http_requests_total {total_requests}",
+            f"pmcursor_http_requests_total {current_total_requests}",
             "# HELP pmcursor_http_errors_total Total HTTP error responses (status >= 400).",
             "# TYPE pmcursor_http_errors_total counter",
-            f"pmcursor_http_errors_total {error_requests}",
+            f"pmcursor_http_errors_total {current_error_requests}",
             "# HELP pmcursor_repo_cache_entries Number of cached repository maps.",
             "# TYPE pmcursor_repo_cache_entries gauge",
             f"pmcursor_repo_cache_entries {cache.size}",

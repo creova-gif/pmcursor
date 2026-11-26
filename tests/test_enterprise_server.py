@@ -409,3 +409,56 @@ def test_jira_webhook_delivery_deduplication(tmp_path: Path) -> None:
     assert first.json()["ticket_id"] == "PROJ-42"
     assert second.status_code == 200
     assert second.json() == {"status": "duplicate", "delivery_id": "jira-deliv-1"}
+
+
+def test_cors_origins_allowlist_and_disabled_by_default(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.delenv("PMCURSOR_CORS_ORIGINS", raising=False)
+    default_client = TestClient(create_app())
+    default_resp = default_client.get(
+        "/health",
+        headers={"Origin": "https://app.example.com"},
+    )
+    assert default_resp.status_code == 200
+    assert "access-control-allow-origin" not in default_resp.headers
+
+    allowlist_client = TestClient(
+        create_app(cors_origins=["https://app.example.com"])
+    )
+    allowed_resp = allowlist_client.get(
+        "/health",
+        headers={"Origin": "https://app.example.com"},
+    )
+    assert allowed_resp.status_code == 200
+    assert allowed_resp.headers.get("access-control-allow-origin") == "https://app.example.com"
+
+    disallowed_resp = allowlist_client.get(
+        "/health",
+        headers={"Origin": "https://evil.example.com"},
+    )
+    assert disallowed_resp.status_code == 200
+    assert "access-control-allow-origin" not in disallowed_resp.headers
+
+    preflight_resp = allowlist_client.options(
+        "/v1/drift/audit",
+        headers={
+            "Origin": "https://app.example.com",
+            "Access-Control-Request-Method": "POST",
+            "Access-Control-Request-Headers": "Authorization, Content-Type",
+        },
+    )
+    assert preflight_resp.status_code == 200
+    assert preflight_resp.headers.get("access-control-allow-origin") == "https://app.example.com"
+
+    monkeypatch.setenv(
+        "PMCURSOR_CORS_ORIGINS",
+        " https://env.example.com , , https://admin.example.com ",
+    )
+    env_client = TestClient(create_app())
+    env_allowed = env_client.get(
+        "/health",
+        headers={"Origin": "https://admin.example.com"},
+    )
+    assert env_allowed.status_code == 200
+    assert env_allowed.headers.get("access-control-allow-origin") == "https://admin.example.com"
