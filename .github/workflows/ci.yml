@@ -11,7 +11,7 @@ jobs:
         with:
           python-version: "3.12"
       - name: Install dependencies
-        run: pip install pytest ruff mypy pydantic
+        run: pip install pytest ruff mypy pydantic fastapi httpx
       - name: Lint
         run: ruff check src indexer api web evals tests
       - name: Type check

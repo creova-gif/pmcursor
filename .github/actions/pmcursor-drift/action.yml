@@ -1,0 +1,40 @@
+name: "PMCursor Spec Drift Check"
+description: "Audit PRDs against repository AST contracts and flag fabricated file:line citations."
+
+inputs:
+  prd:
+    description: "Path to the PRD or markdown specification file"
+    required: true
+  repo:
+    description: "Repository root directory"
+    required: false
+    default: "."
+  fail-on-drift:
+    description: "Exit with code 1 if any drift finding or fabricated citation is detected"
+    required: false
+    default: "true"
+  python-version:
+    description: "Python version to install"
+    required: false
+    default: "3.12"
+
+runs:
+  using: "composite"
+  steps:
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: ${{ inputs.python-version }}
+
+    - name: Install PMCursor
+      shell: bash
+      run: pip install --no-cache-dir "${{ github.action_path }}/../../.."
+
+    - name: Run PMCursor drift check
+      shell: bash
+      run: |
+        ARGS=(drift --prd "${{ inputs.prd }}" --repo "${{ inputs.repo }}" --md)
+        if [ "${{ inputs.fail-on-drift }}" = "true" ]; then
+          ARGS+=(--fail-on-drift)
+        fi
+        pmcursor "${ARGS[@]}"
