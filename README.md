@@ -123,6 +123,7 @@ pip install 'pmcursor[server]'
 - `PMCURSOR_LINEAR_WEBHOOK_SECRET`: HMAC-SHA256 secret used to verify incoming Linear webhook signatures (`Linear-Signature`).
 - `PMCURSOR_JIRA_WEBHOOK_SECRET`: HMAC-SHA256 secret used to verify incoming Jira webhook signatures (`X-Hub-Signature`); falls back to Bearer `PMCURSOR_API_TOKEN` when unset.
 - `PMCURSOR_RATE_LIMIT_PER_MIN`: Per-client request rate limit per minute (returns HTTP `429 Too Many Requests` with `Retry-After` when exceeded; `/health` and `/readyz` probes are exempt).
+- `PMCURSOR_TRUST_PROXY`: Opt-in flag to resolve client IP addresses from `X-Forwarded-For` for rate limiting behind trusted reverse proxies (disabled by default).
 - `WEB_CONCURRENCY`: Number of Uvicorn worker processes.
 
 ### Endpoints
@@ -130,6 +131,7 @@ pip install 'pmcursor[server]'
 - `GET /health`
 - `GET /readyz` (readiness probe with cached repo count)
 - `GET /metrics` (Prometheus-format request and repo cache metrics)
+- `POST /v1/cache/clear` (clear cached repository indexes)
 - `POST /v1/drift/audit`
 - `POST /v1/webhooks/github`
 - `POST /v1/webhooks/linear` (`Linear-Signature` HMAC-SHA256, `PMCURSOR_LINEAR_WEBHOOK_SECRET`)

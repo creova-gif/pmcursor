@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import json
+import urllib.error
 import urllib.request
+from email.message import Message
 from typing import Any
 from unittest.mock import MagicMock
 
@@ -203,3 +205,107 @@ def test_publisher_missing_token_and_invalid_url_raise() -> None:
 
     with pytest.raises(ValueError, match="https://"):
         publish_jira_comment("file:///etc/passwd", "PROJ-1", "hi", dry_run=True)
+
+
+def _http_error(url: str, code: int, reason: str) -> urllib.error.HTTPError:
+    return urllib.error.HTTPError(url=url, code=code, msg=reason, hdrs=Message(), fp=None)
+
+
+def test_publisher_retries_transient_503_and_succeeds(monkeypatch: pytest.MonkeyPatch) -> None:
+    attempts = 0
+
+    def fake_urlopen(req: urllib.request.Request, timeout: int = 15) -> MagicMock:
+        nonlocal attempts
+        attempts += 1
+        if attempts == 1:
+            raise _http_error(req.full_url, 503, "Service Unavailable")
+        resp = MagicMock()
+        resp.__enter__.return_value = resp
+        resp.__exit__.return_value = False
+        resp.status = 201
+        return resp
+
+    monkeypatch.setattr(urllib.request, "urlopen", fake_urlopen)
+
+    result = publish_github_pr_comment(
+        "acme/app",
+        42,
+        "Retry worked",
+        token="ghp_secret",
+        max_retries=2,
+        retry_delay_seconds=0.0,
+    )
+    assert attempts == 2
+    assert result.status_code == 201
+
+
+def test_publisher_does_not_retry_non_retryable_401(monkeypatch: pytest.MonkeyPatch) -> None:
+    attempts = 0
+
+    def fake_urlopen(req: urllib.request.Request, timeout: int = 15) -> MagicMock:
+        nonlocal attempts
+        attempts += 1
+        raise _http_error(req.full_url, 401, "Unauthorized")
+
+    monkeypatch.setattr(urllib.request, "urlopen", fake_urlopen)
+
+    with pytest.raises(RuntimeError, match="HTTP 401") as exc_info:
+        publish_linear_comment(
+            "ENG-42",
+            "Should fail immediately",
+            api_key="lin_bad",
+            max_retries=2,
+            retry_delay_seconds=0.0,
+        )
+
+    assert attempts == 1
+    assert isinstance(exc_info.value.__cause__, urllib.error.HTTPError)
+    assert exc_info.value.__cause__.code == 401
+
+
+def test_publisher_exhausting_max_retries_raises_final_error(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    http_attempts = 0
+
+    def fail_http(req: urllib.request.Request, timeout: int = 15) -> MagicMock:
+        nonlocal http_attempts
+        http_attempts += 1
+        raise _http_error(req.full_url, 503, f"Attempt {http_attempts}")
+
+    monkeypatch.setattr(urllib.request, "urlopen", fail_http)
+
+    with pytest.raises(RuntimeError, match="Attempt 3") as http_exc_info:
+        publish_jira_comment(
+            "https://jira.example.com",
+            "PROJ-9",
+            "Still failing",
+            bearer_token="jira_tok",
+            max_retries=2,
+            retry_delay_seconds=0.0,
+        )
+
+    assert http_attempts == 3
+    assert isinstance(http_exc_info.value.__cause__, urllib.error.HTTPError)
+    assert http_exc_info.value.__cause__.code == 503
+
+    url_attempts = 0
+
+    def fail_url(req: urllib.request.Request, timeout: int = 15) -> MagicMock:
+        nonlocal url_attempts
+        url_attempts += 1
+        raise urllib.error.URLError(f"Network down {url_attempts}")
+
+    monkeypatch.setattr(urllib.request, "urlopen", fail_url)
+
+    with pytest.raises(urllib.error.URLError, match="Network down 3"):
+        publish_github_pr_comment(
+            "acme/app",
+            99,
+            "Network down",
+            token="ghp_secret",
+            max_retries=2,
+            retry_delay_seconds=0.0,
+        )
+
+    assert url_attempts == 3
