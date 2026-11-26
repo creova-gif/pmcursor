@@ -4,6 +4,7 @@ import hashlib
 import hmac
 import re
 from pathlib import Path
+from typing import Any
 
 from pydantic import BaseModel
 
@@ -65,15 +66,60 @@ def audit_prd_against_repo(request: DriftAuditRequest) -> DriftReport:
     )
 
 
+def _hmac_sha256_hex(payload_body: bytes, secret: str) -> str:
+    return hmac.new(secret.encode("utf-8"), payload_body, hashlib.sha256).hexdigest()
+
+
 def verify_github_signature(payload_body: bytes, signature_header: str, secret: str) -> bool:
     """Verify a GitHub webhook X-Hub-Signature-256 HMAC-SHA256 signature."""
     if not secret or not signature_header.startswith("sha256="):
         return False
-    expected = (
-        "sha256="
-        + hmac.new(secret.encode("utf-8"), payload_body, hashlib.sha256).hexdigest()
-    )
+    expected = "sha256=" + _hmac_sha256_hex(payload_body, secret)
     return hmac.compare_digest(expected, signature_header)
+
+
+def verify_linear_signature(payload_body: bytes, signature_header: str, secret: str) -> bool:
+    """Verify a Linear webhook Linear-Signature raw hex HMAC-SHA256 signature."""
+    if not secret or not signature_header:
+        return False
+    expected = _hmac_sha256_hex(payload_body, secret)
+    return hmac.compare_digest(expected, signature_header.strip())
+
+
+def verify_jira_signature(payload_body: bytes, signature_header: str, secret: str) -> bool:
+    """Verify a Jira webhook X-Hub-Signature sha256=<hex> HMAC-SHA256 signature."""
+    return verify_github_signature(payload_body, signature_header, secret)
+
+
+def parse_linear_webhook_issue(data: dict[str, Any]) -> tuple[str, str, str] | None:
+    """Extract (ticket_id, title, description) from a Linear Issue webhook payload."""
+    if data.get("type") != "Issue":
+        return None
+    issue = data.get("data")
+    if not isinstance(issue, dict):
+        return None
+    ticket_id = issue.get("identifier") or issue.get("id")
+    if not ticket_id or not str(ticket_id).strip():
+        return None
+    title = issue.get("title") or ""
+    description = issue.get("description") or ""
+    return (str(ticket_id), str(title), str(description))
+
+
+def parse_jira_webhook_issue(data: dict[str, Any]) -> tuple[str, str, str] | None:
+    """Extract (ticket_id, title, description) from a Jira issue webhook payload."""
+    issue = data.get("issue")
+    if not isinstance(issue, dict):
+        return None
+    ticket_id = issue.get("key") or issue.get("id")
+    if not ticket_id or not str(ticket_id).strip():
+        return None
+    raw_fields = issue.get("fields")
+    fields: dict[str, Any] = raw_fields if isinstance(raw_fields, dict) else {}
+    title = fields.get("summary") or ""
+    raw_description = fields.get("description")
+    description = raw_description if isinstance(raw_description, str) else ""
+    return (str(ticket_id), str(title), description)
 
 
 def parse_unified_diff_ranges(diff_text: str) -> dict[str, list[tuple[int, int]]]:

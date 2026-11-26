@@ -1,5 +1,12 @@
 from __future__ import annotations
 
+from pmcursor.checklists import (
+    EdgeCaseCategory,
+    EdgeCaseChecklist,
+    EdgeCaseItem,
+    EdgeCasePriority,
+    generate_edge_case_checklist,
+)
 from pmcursor.drift import (
     check_spec_drift,
     fix_prd_markdown,
@@ -25,11 +32,20 @@ from pmcursor.models import (
     TelemetrySourceKind,
 )
 from pmcursor.plugin_validator import validate_plugin_manifests
+from pmcursor.tickets import (
+    TicketProvider,
+    TicketSyncReport,
+    audit_ticket_against_repo,
+)
 
 __all__ = [
     "ADRContract",
     "DriftFinding",
     "DriftReport",
+    "EdgeCaseCategory",
+    "EdgeCaseChecklist",
+    "EdgeCaseItem",
+    "EdgeCasePriority",
     "EvalBenchmarkResult",
     "FieldContract",
     "FixPrdResult",
@@ -42,9 +58,13 @@ __all__ = [
     "SpecAlignmentScore",
     "TelemetryContract",
     "TelemetrySourceKind",
+    "TicketProvider",
+    "TicketSyncReport",
+    "audit_ticket_against_repo",
     "check_spec_drift",
     "fix_prd_markdown",
     "format_drift_report_markdown",
+    "generate_edge_case_checklist",
     "healthcheck",
     "index_repository",
     "run_eval_benchmark",

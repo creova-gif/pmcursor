@@ -70,6 +70,8 @@ pip install 'pmcursor[server]'
 
 - `PMCURSOR_API_TOKEN`: Bearer token for API authentication. Required when binding `serve` to a non-loopback host (anything other than `127.0.0.1`, `localhost`, or `::1`).
 - `PMCURSOR_WEBHOOK_SECRET`: HMAC secret used to verify incoming GitHub webhook signatures.
+- `PMCURSOR_LINEAR_WEBHOOK_SECRET`: HMAC-SHA256 secret used to verify incoming Linear webhook signatures (`Linear-Signature`).
+- `PMCURSOR_JIRA_WEBHOOK_SECRET`: HMAC-SHA256 secret used to verify incoming Jira webhook signatures (`X-Hub-Signature`); falls back to Bearer `PMCURSOR_API_TOKEN` when unset.
 - `WEB_CONCURRENCY`: Number of Uvicorn worker processes.
 
 ### Endpoints
@@ -77,6 +79,8 @@ pip install 'pmcursor[server]'
 - `GET /health`
 - `POST /v1/drift/audit`
 - `POST /v1/webhooks/github`
+- `POST /v1/webhooks/linear` (`Linear-Signature` HMAC-SHA256, `PMCURSOR_LINEAR_WEBHOOK_SECRET`)
+- `POST /v1/webhooks/jira` (`X-Hub-Signature` HMAC-SHA256 via `PMCURSOR_JIRA_WEBHOOK_SECRET` or Bearer `PMCURSOR_API_TOKEN`)
 - `POST /v1/tickets/audit`
 - `POST /v1/checklist`
 - `POST /v1/canvas`
