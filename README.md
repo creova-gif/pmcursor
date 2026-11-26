@@ -106,7 +106,7 @@ PMCursor adapts plugin packaging and CLI conventions from [`cursor/plugins`](htt
 
 ## FastAPI Server & GitHub Action
 
-Install the optional server dependencies before running `serve` or starting [api/server.py](api/server.py):
+Install the optional server dependencies before running `serve` or starting [api/server.py](api/server.py), or build the production container image using [Dockerfile](Dockerfile) (see [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md)):
 
 ```bash
 pip install 'pmcursor[server]'
@@ -123,6 +123,7 @@ pip install 'pmcursor[server]'
 ### Endpoints
 
 - `GET /health`
+- `GET /readyz` (readiness probe with cached repo count)
 - `POST /v1/drift/audit`
 - `POST /v1/webhooks/github`
 - `POST /v1/webhooks/linear` (`Linear-Signature` HMAC-SHA256, `PMCURSOR_LINEAR_WEBHOOK_SECRET`)
@@ -169,4 +170,5 @@ Contributions are welcome! See [CONTRIBUTING.md](CONTRIBUTING.md) for local setu
 - [ADR-001 on AST contract indexing](docs/adr/001-contract-first-repo-indexing.md)
 - [ADR-002 on plugin and skill architecture](docs/adr/002-cursor-plugin-and-gstack-skill-architecture.md)
 - [Roadmap](docs/ROADMAP.md)
+- [Deployment guide](docs/DEPLOYMENT.md)
 - [Engineering standards](AGENTS.md) and [threat model](docs/THREAT_MODEL.md)

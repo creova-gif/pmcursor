@@ -21,9 +21,16 @@ All notable changes to PMCursor are documented in this file.
 - Added runtime telemetry sample verification in `src/pmcursor/telemetry_verify.py` (`verify_telemetry_samples`, `ObservedTelemetryEvent`, `TelemetryDriftItem`, `TelemetryVerificationReport`), the `pmcursor telemetry-verify` CLI subcommand, and the `POST /v1/telemetry/verify` API endpoint.
 - Added bi-directional comment publishing in `src/pmcursor/publisher.py` (`publish_github_pr_comment`, `publish_linear_comment`, `publish_jira_comment`, `PublishResult`) and the org alignment dashboard via `pmcursor dashboard` and `GET /v1/dashboard`.
 - Added the project milestone roadmap in `docs/ROADMAP.md` (`M1`–`M16` completed), `CONTRIBUTING.md`, and GitHub issue/PR templates under `.github/`.
+- Added `GET /readyz` readiness probe (reporting cached repository count) and `X-Request-ID` / `X-Process-Time-Ms` observability middleware in `api/server.py`.
+- Added production container packaging (`Dockerfile`, `.dockerignore`), [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md), and a Python `3.11`/`3.12` CI test matrix in `.github/workflows/ci.yml`.
 
-### Security & Hardening
+### Performance
 
+- Integrated `RepoIndexCache` in `api/server.py` to cache repository contract indexes across API requests.
+
+### Security
+
+- Added a `2MB` webhook payload cap returning HTTP `413` on oversized webhook requests in `api/server.py`.
 - Added a server bind guard requiring `PMCURSOR_API_TOKEN` when binding to non-loopback hosts, `WEB_CONCURRENCY` worker configuration, graceful CLI handling when `pmcursor[server]` extras are not installed, and Markdown table cell escaping.
 
 ## v0.1.0 (2026-11-25)
