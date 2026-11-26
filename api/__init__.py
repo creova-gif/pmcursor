@@ -15,11 +15,31 @@ from pmcursor.models import (
     PRImpactReport,
     RepoMap,
 )
+from pmcursor.tickets import TicketProvider
 
 _HUNK_HEADER_RE = re.compile(r"^@@ -\d+(?:,\d+)? \+(\d+)(?:,(\d+))? @@")
 
 
 class DriftAuditRequest(BaseModel):
+    prd_markdown: str
+    repo_root: str = "."
+    prd_path: str = "PRD.md"
+
+
+class TicketAuditRequest(BaseModel):
+    ticket_id: str
+    title: str
+    description: str
+    provider: TicketProvider = "linear"
+    repo_root: str = "."
+
+
+class ChecklistRequest(BaseModel):
+    repo_root: str = "."
+    prd_markdown: str | None = None
+
+
+class CanvasRequest(BaseModel):
     prd_markdown: str
     repo_root: str = "."
     prd_path: str = "PRD.md"

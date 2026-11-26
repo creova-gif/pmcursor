@@ -9,17 +9,25 @@ from typing import TYPE_CHECKING, Any
 from urllib.parse import parse_qs
 
 from fastapi import FastAPI, Header, HTTPException
+from fastapi.responses import HTMLResponse
 from pydantic import ValidationError
 
 from api import (
+    CanvasRequest,
+    ChecklistRequest,
     DriftAuditRequest,
     GitHubWebhookPayload,
+    TicketAuditRequest,
     audit_prd_against_repo,
     compute_pr_impact,
     verify_github_signature,
 )
+from pmcursor.checklists import EdgeCaseChecklist, generate_edge_case_checklist
+from pmcursor.drift import check_spec_drift
 from pmcursor.indexer import index_repository
 from pmcursor.models import DriftReport, PRImpactReport
+from pmcursor.tickets import TicketSyncReport, audit_ticket_against_repo
+from web.canvas import render_split_pane_canvas
 
 if TYPE_CHECKING:
     from fastapi import Request as FastAPIRequest
@@ -69,6 +77,40 @@ def _decode_webhook_json(payload_body: bytes, content_type: str) -> Any:
     return json.loads(text)
 
 
+def _require_auth(
+    api_token: str | None,
+    authorization: str,
+    x_pmcursor_token: str,
+) -> None:
+    resolved_token = (
+        api_token
+        if api_token is not None
+        else os.environ.get("PMCURSOR_API_TOKEN", "")
+    )
+    if resolved_token and not _is_authorized(
+        resolved_token, authorization, x_pmcursor_token
+    ):
+        raise HTTPException(status_code=401, detail="Unauthorized")
+
+
+def _resolve_allowed_repo_root(
+    repo_root: str,
+    allowed_workspace_root: Path | None,
+) -> Path:
+    repo_path = Path(repo_root).resolve()
+    if allowed_workspace_root is not None and not repo_path.is_relative_to(
+        allowed_workspace_root.resolve()
+    ):
+        raise HTTPException(
+            status_code=403, detail="Repository root outside allowed workspace"
+        )
+    if not repo_path.is_dir():
+        raise HTTPException(
+            status_code=404, detail="Repository directory not found"
+        )
+    return repo_path
+
+
 def create_app(
     *,
     webhook_secret: str | None = None,
@@ -88,27 +130,60 @@ def create_app(
         authorization: str = Header(default="", alias="Authorization"),
         x_pmcursor_token: str = Header(default="", alias="X-PMCursor-Token"),
     ) -> DriftReport:
-        resolved_token = (
-            api_token
-            if api_token is not None
-            else os.environ.get("PMCURSOR_API_TOKEN", "")
-        )
-        if resolved_token and not _is_authorized(
-            resolved_token, authorization, x_pmcursor_token
-        ):
-            raise HTTPException(status_code=401, detail="Unauthorized")
-        repo_path = Path(body.repo_root).resolve()
-        if allowed_workspace_root is not None and not repo_path.is_relative_to(
-            allowed_workspace_root.resolve()
-        ):
-            raise HTTPException(
-                status_code=403, detail="Repository root outside allowed workspace"
-            )
-        if not repo_path.is_dir():
-            raise HTTPException(
-                status_code=404, detail="Repository directory not found"
-            )
+        _require_auth(api_token, authorization, x_pmcursor_token)
+        _resolve_allowed_repo_root(body.repo_root, allowed_workspace_root)
         return audit_prd_against_repo(body)
+
+    @fastapi_app.post("/v1/tickets/audit", response_model=TicketSyncReport)
+    def tickets_audit(
+        body: TicketAuditRequest,
+        authorization: str = Header(default="", alias="Authorization"),
+        x_pmcursor_token: str = Header(default="", alias="X-PMCursor-Token"),
+    ) -> TicketSyncReport:
+        _require_auth(api_token, authorization, x_pmcursor_token)
+        repo_path = _resolve_allowed_repo_root(body.repo_root, allowed_workspace_root)
+        repo_map = index_repository(repo_path)
+        return audit_ticket_against_repo(
+            body.ticket_id,
+            body.title,
+            body.description,
+            repo_map,
+            provider=body.provider,
+            repo_root=repo_path,
+        )
+
+    @fastapi_app.post("/v1/checklist", response_model=EdgeCaseChecklist)
+    def checklist_endpoint(
+        body: ChecklistRequest,
+        authorization: str = Header(default="", alias="Authorization"),
+        x_pmcursor_token: str = Header(default="", alias="X-PMCursor-Token"),
+    ) -> EdgeCaseChecklist:
+        _require_auth(api_token, authorization, x_pmcursor_token)
+        repo_path = _resolve_allowed_repo_root(body.repo_root, allowed_workspace_root)
+        repo_map = index_repository(repo_path)
+        return generate_edge_case_checklist(
+            repo_map,
+            prd_markdown=body.prd_markdown,
+            repo_root=repo_path,
+        )
+
+    @fastapi_app.post("/v1/canvas", response_class=HTMLResponse)
+    def canvas_endpoint(
+        body: CanvasRequest,
+        authorization: str = Header(default="", alias="Authorization"),
+        x_pmcursor_token: str = Header(default="", alias="X-PMCursor-Token"),
+    ) -> HTMLResponse:
+        _require_auth(api_token, authorization, x_pmcursor_token)
+        repo_path = _resolve_allowed_repo_root(body.repo_root, allowed_workspace_root)
+        repo_map = index_repository(repo_path)
+        report = check_spec_drift(
+            body.prd_markdown,
+            repo_map,
+            prd_path=body.prd_path,
+            repo_root=repo_path,
+        )
+        html_doc = render_split_pane_canvas(body.prd_markdown, repo_map, report)
+        return HTMLResponse(content=html_doc)
 
     @fastapi_app.post("/v1/webhooks/github")
     async def github_webhook(
