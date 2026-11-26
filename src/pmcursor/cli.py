@@ -4,6 +4,7 @@ import argparse
 import json
 import os
 import platform
+import shutil
 import subprocess
 import sys
 from collections.abc import Callable, Sequence
@@ -620,8 +621,13 @@ def _require_prd_and_repo(prd_path: Path, repo_path: Path, example_cmd: str) -> 
 def _load_diff_text(diff_path: Path | None, repo_path: Path, base_ref: str) -> str:
     if diff_path is not None:
         return diff_path.read_text(encoding="utf-8")
-    proc = subprocess.run(
-        ["git", "-C", str(repo_path), "diff", f"{base_ref}...HEAD"],
+    if base_ref.startswith("-"):
+        raise ValueError(f"Invalid git base ref: {base_ref!r}")
+    git_exe = shutil.which("git")
+    if git_exe is None:
+        return ""
+    proc = subprocess.run(  # noqa: S603
+        [git_exe, "-C", str(repo_path), "diff", f"{base_ref}...HEAD"],
         capture_output=True,
         text=True,
         check=False,
