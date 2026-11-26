@@ -57,6 +57,10 @@ PMCursor adapts plugin packaging and CLI conventions from [`cursor/plugins`](htt
 	```bash
 	PYTHONPATH=src python3 -m pmcursor.cli serve --host 127.0.0.1 --port 8000
 	```
+11. Synthesize diff-grounded release notes and a PRD scope coverage matrix.
+	```bash
+	PYTHONPATH=src python3 -m pmcursor.cli release-notes --prd PROJECT_SPEC.md --repo . --base main --version v0.1.0
+	```
 
 ## FastAPI Server & GitHub Action
 
@@ -84,6 +88,7 @@ pip install 'pmcursor[server]'
 - `POST /v1/tickets/audit`
 - `POST /v1/checklist`
 - `POST /v1/canvas`
+- `POST /v1/release-notes`
 
 ### Composite GitHub Action
 
@@ -114,4 +119,5 @@ ln -sfn "$(pwd)" ~/.cursor/plugins/local/pmcursor
 - [Portfolio strategy](https://docs.google.com/document/d/12Wpg5mMGnjnl2uhMBTOR0QqRzQj8kwfzTLpvLoRuB5Q/edit?usp=drivesdk&ouid=110227624285917376281)
 - [ADR-001 on AST contract indexing](docs/adr/001-contract-first-repo-indexing.md)
 - [ADR-002 on plugin and skill architecture](docs/adr/002-cursor-plugin-and-gstack-skill-architecture.md)
+- [Roadmap](docs/ROADMAP.md)
 - [Engineering standards](AGENTS.md) and [threat model](docs/THREAT_MODEL.md)

@@ -32,6 +32,13 @@ from pmcursor.models import (
     TelemetrySourceKind,
 )
 from pmcursor.plugin_validator import validate_plugin_manifests
+from pmcursor.release_notes import (
+    ReleaseNotesEntry,
+    ReleaseNotesReport,
+    ScopeCoverageReport,
+    compute_scope_coverage,
+    generate_release_notes_and_coverage,
+)
 from pmcursor.tickets import (
     TicketProvider,
     TicketSyncReport,
@@ -53,8 +60,11 @@ __all__ = [
     "PRImpactItem",
     "PRImpactReport",
     "PluginValidationResult",
+    "ReleaseNotesEntry",
+    "ReleaseNotesReport",
     "RepoMap",
     "RouteContract",
+    "ScopeCoverageReport",
     "SpecAlignmentScore",
     "TelemetryContract",
     "TelemetrySourceKind",
@@ -62,9 +72,11 @@ __all__ = [
     "TicketSyncReport",
     "audit_ticket_against_repo",
     "check_spec_drift",
+    "compute_scope_coverage",
     "fix_prd_markdown",
     "format_drift_report_markdown",
     "generate_edge_case_checklist",
+    "generate_release_notes_and_coverage",
     "healthcheck",
     "index_repository",
     "run_eval_benchmark",

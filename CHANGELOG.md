@@ -14,6 +14,8 @@ All notable changes to PMCursor are documented in this file.
 - Added Prisma (`.prisma`) and GraphQL (`.graphql`/`.gql`) contract indexing in `src/pmcursor/indexer.py`.
 - Added `step-summary` and `checklist` inputs to `.github/actions/pmcursor-drift/action.yml` to publish Markdown drift reports and edge-case checklists to GitHub Step Summary.
 - Added optional `EdgeCaseChecklist` rendering in `render_split_pane_canvas` (`web/canvas.py`) with HTML escaping for all checklist fields.
+- Added the release notes synthesizer and PRD scope coverage matrix in `src/pmcursor/release_notes.py` (`ScopeCoverageReport`, `pmcursor release-notes`, and `POST /v1/release-notes`).
+- Added the project milestone roadmap in `docs/ROADMAP.md`.
 
 ### Security & Hardening
 

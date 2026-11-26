@@ -46,6 +46,14 @@ class CanvasRequest(BaseModel):
     prd_path: str = "PRD.md"
 
 
+class ReleaseNotesRequest(BaseModel):
+    prd_markdown: str
+    diff_text: str = ""
+    repo_root: str = "."
+    prd_path: str = "PRD.md"
+    version: str = "Unreleased"
+
+
 class GitHubWebhookPayload(BaseModel):
     org_id: str = "default"
     prd_markdown: str

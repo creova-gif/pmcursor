@@ -17,6 +17,7 @@ from api import (
     ChecklistRequest,
     DriftAuditRequest,
     GitHubWebhookPayload,
+    ReleaseNotesRequest,
     TicketAuditRequest,
     audit_prd_against_repo,
     compute_pr_impact,
@@ -30,6 +31,10 @@ from pmcursor.checklists import EdgeCaseChecklist, generate_edge_case_checklist
 from pmcursor.drift import check_spec_drift
 from pmcursor.indexer import index_repository
 from pmcursor.models import DriftReport, PRImpactReport
+from pmcursor.release_notes import (
+    ReleaseNotesReport,
+    generate_release_notes_and_coverage,
+)
 from pmcursor.tickets import TicketSyncReport, audit_ticket_against_repo
 from web.canvas import render_split_pane_canvas
 
@@ -207,6 +212,24 @@ def create_app(
         )
         html_doc = render_split_pane_canvas(body.prd_markdown, repo_map, report)
         return HTMLResponse(content=html_doc)
+
+    @fastapi_app.post("/v1/release-notes", response_model=ReleaseNotesReport)
+    def release_notes_endpoint(
+        body: ReleaseNotesRequest,
+        authorization: str = Header(default="", alias="Authorization"),
+        x_pmcursor_token: str = Header(default="", alias="X-PMCursor-Token"),
+    ) -> ReleaseNotesReport:
+        _require_auth(api_token, authorization, x_pmcursor_token)
+        repo_path = _resolve_allowed_repo_root(body.repo_root, allowed_workspace_root)
+        repo_map = index_repository(repo_path)
+        return generate_release_notes_and_coverage(
+            body.prd_markdown,
+            body.diff_text,
+            repo_map,
+            prd_path=body.prd_path,
+            version=body.version,
+            repo_root=repo_path,
+        )
 
     @fastapi_app.post("/v1/webhooks/github")
     async def github_webhook(

@@ -16,6 +16,7 @@ from pmcursor.drift import (
 from pmcursor.eval_runner import run_eval_benchmark
 from pmcursor.indexer import index_repository
 from pmcursor.plugin_validator import validate_plugin_manifests
+from pmcursor.release_notes import generate_release_notes_and_coverage
 from pmcursor.tickets import audit_ticket_against_repo
 from web.canvas import render_split_pane_canvas
 
@@ -348,6 +349,54 @@ def build_parser() -> argparse.ArgumentParser:
         help="Bind port number (default: 8000)",
     )
 
+    release_notes_parser = subparsers.add_parser(
+        "release-notes",
+        help="Generate release notes and PRD scope coverage from a git diff or diff file.",
+        epilog="Examples:\n  python3 -m pmcursor.cli release-notes --prd PRD.md --repo . --base HEAD~1\n  python3 -m pmcursor.cli release-notes --prd PRD.md --repo . --diff-file pr.diff --version v1.2.0 --json",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
+    release_notes_parser.add_argument(
+        "--prd",
+        type=Path,
+        required=True,
+        help="Path to the PRD markdown file",
+    )
+    release_notes_parser.add_argument(
+        "--repo",
+        type=Path,
+        default=Path("."),
+        help="Repository root directory (default: .)",
+    )
+    release_notes_parser.add_argument(
+        "--base",
+        type=str,
+        default="HEAD~1",
+        help="Base git ref for diff calculation when --diff-file is omitted (default: HEAD~1)",
+    )
+    release_notes_parser.add_argument(
+        "--diff-file",
+        type=Path,
+        default=None,
+        help="Path to a unified diff file (defaults to `git diff <base>...HEAD`)",
+    )
+    release_notes_parser.add_argument(
+        "--version",
+        type=str,
+        default="Unreleased",
+        help="Release version label (default: Unreleased)",
+    )
+    release_notes_parser.add_argument(
+        "--output",
+        type=Path,
+        default=None,
+        help="Optional file path to write the release notes report",
+    )
+    release_notes_parser.add_argument(
+        "--json",
+        action="store_true",
+        help="Emit JSON ReleaseNotesReport",
+    )
+
     return parser
 
 
@@ -637,6 +686,49 @@ def main(argv: Sequence[str] | None = None) -> int:
         except (RuntimeError, ValueError) as exc:
             print(f"Error: {exc}", file=sys.stderr)
             return 2
+        return 0
+
+    if args.command == "release-notes":
+        prd_path = args.prd
+        repo_path = args.repo
+        if not _require_prd_and_repo(
+            prd_path,
+            repo_path,
+            "python3 -m pmcursor.cli release-notes --prd PROJECT_SPEC.md --repo . --base HEAD~1",
+        ):
+            return 2
+        if args.diff_file is not None and not args.diff_file.is_file():
+            print(
+                f"Error: Diff file '{args.diff_file}' not found.\n"
+                "  Try: python3 -m pmcursor.cli release-notes --prd PROJECT_SPEC.md --repo . --base HEAD~1",
+                file=sys.stderr,
+            )
+            return 2
+
+        prd_md = prd_path.read_text(encoding="utf-8")
+        resolved_repo = repo_path.resolve()
+        diff_text = _load_diff_text(args.diff_file, resolved_repo, args.base)
+        repo_map = index_repository(repo_path)
+        release_report = generate_release_notes_and_coverage(
+            prd_md,
+            diff_text,
+            repo_map,
+            prd_path=prd_path.as_posix(),
+            version=args.version,
+            repo_root=resolved_repo,
+        )
+        output_text = (
+            release_report.model_dump_json(indent=2)
+            if args.json
+            else release_report.markdown
+        )
+        if args.output is not None:
+            output_path = args.output
+            output_path.parent.mkdir(parents=True, exist_ok=True)
+            content = output_text if output_text.endswith("\n") else output_text + "\n"
+            output_path.write_text(content, encoding="utf-8")
+        else:
+            print(output_text, end="" if output_text.endswith("\n") else "\n")
         return 0
 
     return 2
