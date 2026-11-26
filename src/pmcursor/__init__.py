@@ -45,12 +45,24 @@ from pmcursor.models import (
     TelemetrySourceKind,
 )
 from pmcursor.plugin_validator import validate_plugin_manifests
+from pmcursor.publisher import (
+    PublishResult,
+    publish_github_pr_comment,
+    publish_jira_comment,
+    publish_linear_comment,
+)
 from pmcursor.release_notes import (
     ReleaseNotesEntry,
     ReleaseNotesReport,
     ScopeCoverageReport,
     compute_scope_coverage,
     generate_release_notes_and_coverage,
+)
+from pmcursor.telemetry_verify import (
+    ObservedTelemetryEvent,
+    TelemetryDriftItem,
+    TelemetryVerificationReport,
+    verify_telemetry_samples,
 )
 from pmcursor.tickets import (
     TicketProvider,
@@ -73,10 +85,12 @@ __all__ = [
     "FixPrdResult",
     "FlagAuditReport",
     "ModelContract",
+    "ObservedTelemetryEvent",
     "PMCursorMCPServer",
     "PRImpactItem",
     "PRImpactReport",
     "PluginValidationResult",
+    "PublishResult",
     "ReleaseNotesEntry",
     "ReleaseNotesReport",
     "RepoIndexCache",
@@ -85,7 +99,9 @@ __all__ = [
     "ScopeCoverageReport",
     "SpecAlignmentScore",
     "TelemetryContract",
+    "TelemetryDriftItem",
     "TelemetrySourceKind",
+    "TelemetryVerificationReport",
     "TicketProvider",
     "TicketSyncReport",
     "audit_feature_flags_and_rollout",
@@ -101,9 +117,13 @@ __all__ = [
     "index_federated_repos",
     "index_repository",
     "merge_repo_maps",
+    "publish_github_pr_comment",
+    "publish_jira_comment",
+    "publish_linear_comment",
     "run_eval_benchmark",
     "run_mcp_server",
     "validate_plugin_manifests",
+    "verify_telemetry_samples",
 ]
 
 

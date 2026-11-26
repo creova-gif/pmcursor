@@ -1,0 +1,43 @@
+name: Feature Request
+description: Propose a new capability, contract extractor, or integration for PMCursor
+title: "[Feature]: "
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Have an idea for PMCursor? Describe the problem you're trying to solve and how it fits into contract indexing or spec-vs-code alignment.
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem Statement
+      description: What workflow gap or drift problem does this feature solve?
+      placeholder: Currently, when...
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed Solution
+      description: Describe the CLI command, API endpoint, contract extractor, or MCP tool you envision.
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives Considered
+      description: Any workarounds or alternative designs you considered.
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area
+      options:
+        - AST / Contract Indexer
+        - Drift Engine / PRD Repair
+        - CLI / Eval Harness
+        - FastAPI Server / Webhooks
+        - MCP Server / IDE Plugin
+        - Telemetry / Feature Flags
+        - Documentation
+    validations:
+      required: false
