@@ -14,9 +14,10 @@ from api import (
     DriftAuditRequest,
     GitHubWebhookPayload,
     audit_prd_against_repo,
-    handle_github_webhook,
+    compute_pr_impact,
     verify_github_signature,
 )
+from pmcursor.indexer import index_repository
 from pmcursor.models import DriftReport, PRImpactReport
 
 if TYPE_CHECKING:
@@ -25,6 +26,17 @@ if TYPE_CHECKING:
     WebhookRequest = FastAPIRequest[Any]
 else:
     from fastapi import Request as WebhookRequest
+
+
+def _token_matches(provided: str, expected_bytes: bytes) -> bool:
+    if not provided:
+        return False
+    if hmac.compare_digest(provided.encode("utf-8"), expected_bytes):
+        return True
+    try:
+        return hmac.compare_digest(provided.encode("latin-1"), expected_bytes)
+    except UnicodeEncodeError:
+        return False
 
 
 def _is_authorized(
@@ -40,12 +52,8 @@ def _is_authorized(
         else ""
     )
     header_token = x_pmcursor_token.strip()
-    return (
-        bool(bearer_token)
-        and hmac.compare_digest(bearer_token.encode("utf-8"), expected_bytes)
-    ) or (
-        bool(header_token)
-        and hmac.compare_digest(header_token.encode("utf-8"), expected_bytes)
+    return _token_matches(bearer_token, expected_bytes) or _token_matches(
+        header_token, expected_bytes
     )
 
 
@@ -134,12 +142,20 @@ def create_app(
                     "repository": repo_name,
                 }
         try:
-            GitHubWebhookPayload.model_validate(data)
-            return handle_github_webhook(
-                payload_body,
-                x_hub_signature_256,
-                secret,
-                allowed_workspace_root=allowed_workspace_root,
+            payload = GitHubWebhookPayload.model_validate(data)
+            root = Path(payload.repo_root).resolve()
+            if (
+                allowed_workspace_root is not None
+                and not root.is_relative_to(allowed_workspace_root.resolve())
+            ):
+                raise PermissionError("Repository root outside allowed workspace")
+            repo_map = index_repository(root)
+            return compute_pr_impact(
+                payload.prd_markdown,
+                payload.diff_text,
+                repo_map,
+                prd_path=payload.prd_path,
+                org_id=payload.org_id,
             )
         except ValidationError as exc:
             raise HTTPException(status_code=422, detail=str(exc)) from exc
