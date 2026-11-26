@@ -54,6 +54,11 @@ class ReleaseNotesRequest(BaseModel):
     version: str = "Unreleased"
 
 
+class FlagAuditRequest(BaseModel):
+    prd_markdown: str
+    repo_root: str = "."
+
+
 class GitHubWebhookPayload(BaseModel):
     org_id: str = "default"
     prd_markdown: str

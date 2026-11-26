@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import json
 import subprocess
 import sys
 from collections.abc import Callable, Sequence
@@ -14,6 +15,11 @@ from pmcursor.drift import (
     format_drift_report_markdown,
 )
 from pmcursor.eval_runner import run_eval_benchmark
+from pmcursor.feature_flags import (
+    audit_feature_flags_and_rollout,
+    extract_feature_flags,
+)
+from pmcursor.federation import index_federated_repos
 from pmcursor.indexer import index_repository
 from pmcursor.mcp_server import run_mcp_server
 from pmcursor.plugin_validator import validate_plugin_manifests
@@ -412,6 +418,54 @@ def build_parser() -> argparse.ArgumentParser:
         help="Emit JSON ReleaseNotesReport",
     )
 
+    flags_parser = subparsers.add_parser(
+        "flags",
+        help="Extract feature flags or audit PRD flag & rollback coverage against a repository.",
+        epilog="Examples:\n  python3 -m pmcursor.cli flags --repo . --json\n  python3 -m pmcursor.cli flags --repo . --prd PROJECT_SPEC.md",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
+    flags_parser.add_argument(
+        "--repo",
+        type=Path,
+        default=Path("."),
+        help="Repository root directory (default: .)",
+    )
+    flags_parser.add_argument(
+        "--prd",
+        type=Path,
+        default=None,
+        help="Optional path to a PRD markdown file for rollout & flag audit",
+    )
+    flags_parser.add_argument(
+        "--json",
+        action="store_true",
+        help="Emit machine-readable JSON output",
+    )
+
+    federate_parser = subparsers.add_parser(
+        "federate",
+        help="Index and merge multiple repositories under alias=path prefixes, optionally checking PRD drift.",
+        epilog="Examples:\n  python3 -m pmcursor.cli federate --repos api=./backend web=./frontend --json\n  python3 -m pmcursor.cli federate --repos api=./backend web=./frontend --prd SPEC.md",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
+    federate_parser.add_argument(
+        "--repos",
+        nargs="+",
+        required=True,
+        help="List of alias=path repository entries",
+    )
+    federate_parser.add_argument(
+        "--prd",
+        type=Path,
+        default=None,
+        help="Optional path to a PRD markdown file to run drift checks against the federated RepoMap",
+    )
+    federate_parser.add_argument(
+        "--json",
+        action="store_true",
+        help="Emit machine-readable JSON output",
+    )
+
     return parser
 
 
@@ -748,6 +802,102 @@ def main(argv: Sequence[str] | None = None) -> int:
             output_path.write_text(content, encoding="utf-8")
         else:
             print(output_text, end="" if output_text.endswith("\n") else "\n")
+        return 0
+
+    if args.command == "flags":
+        repo_path = args.repo
+        if not repo_path.is_dir():
+            print(
+                f"Error: Repository directory '{repo_path}' does not exist.\n"
+                "  Try: python3 -m pmcursor.cli flags --repo . --json",
+                file=sys.stderr,
+            )
+            return 2
+        if args.prd is not None:
+            prd_path = args.prd
+            if not prd_path.is_file():
+                print(
+                    f"Error: PRD file '{prd_path}' not found.\n"
+                    "  Try: python3 -m pmcursor.cli flags --repo . --prd PROJECT_SPEC.md",
+                    file=sys.stderr,
+                )
+                return 2
+            prd_md = prd_path.read_text(encoding="utf-8")
+            flag_report = audit_feature_flags_and_rollout(prd_md, repo_path)
+            if args.json:
+                print(flag_report.model_dump_json(indent=2))
+            else:
+                print(
+                    flag_report.markdown,
+                    end="" if flag_report.markdown.endswith("\n") else "\n",
+                )
+            return 0
+
+        flags = extract_feature_flags(repo_path)
+        if args.json:
+            print(json.dumps([f.model_dump() for f in flags], indent=2))
+        elif not flags:
+            print("No feature flags detected.")
+        else:
+            for flag in flags:
+                print(f"{flag.flag_key} [{flag.provider}] ({flag.citation})")
+        return 0
+
+    if args.command == "federate":
+        named_roots: list[tuple[str, Path]] = []
+        for entry in args.repos:
+            alias, sep, raw_path = entry.partition("=")
+            clean_alias = alias.strip()
+            clean_path = raw_path.strip()
+            if not sep or not clean_alias or not clean_path:
+                print(
+                    f"Error: Invalid --repos entry '{entry}'. Expected alias=path.\n"
+                    "  Try: python3 -m pmcursor.cli federate --repos api=./backend web=./frontend",
+                    file=sys.stderr,
+                )
+                return 2
+            root_dir = Path(clean_path)
+            if not root_dir.is_dir():
+                print(
+                    f"Error: Repository directory '{root_dir}' for alias '{clean_alias}' does not exist.\n"
+                    "  Try: python3 -m pmcursor.cli federate --repos api=./backend web=./frontend",
+                    file=sys.stderr,
+                )
+                return 2
+            named_roots.append((clean_alias, root_dir))
+
+        federated_map = index_federated_repos(named_roots)
+        if args.prd is not None:
+            prd_path = args.prd
+            if not prd_path.is_file():
+                print(
+                    f"Error: PRD file '{prd_path}' not found.\n"
+                    "  Try: python3 -m pmcursor.cli federate --repos api=./backend --prd SPEC.md",
+                    file=sys.stderr,
+                )
+                return 2
+            prd_md = prd_path.read_text(encoding="utf-8")
+            drift_report = check_spec_drift(
+                prd_md,
+                federated_map,
+                prd_path=prd_path.as_posix(),
+            )
+            if args.json:
+                print(drift_report.model_dump_json(indent=2))
+            else:
+                print(format_drift_report_markdown(drift_report), end="")
+            return 0
+
+        if args.json:
+            print(federated_map.model_dump_json(indent=2))
+        else:
+            print(
+                f"Federated RepoMap ({len(named_roots)} repos): "
+                f"{len(federated_map.models)} models, "
+                f"{len(federated_map.routes)} routes, "
+                f"{len(federated_map.telemetry)} telemetry, "
+                f"{len(federated_map.adrs)} ADRs"
+            )
         return 0
 
     return 2

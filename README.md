@@ -65,6 +65,14 @@ PMCursor adapts plugin packaging and CLI conventions from [`cursor/plugins`](htt
 	```bash
 	PYTHONPATH=src python3 -m pmcursor.cli mcp
 	```
+13. Extract feature flags or audit PRD flag & rollback coverage against a repository.
+	```bash
+	PYTHONPATH=src python3 -m pmcursor.cli flags --repo . --prd PROJECT_SPEC.md
+	```
+14. Index and merge contracts across multiple repositories into a unified federated `RepoMap` (optionally auditing a PRD).
+	```bash
+	PYTHONPATH=src python3 -m pmcursor.cli federate --repos api=./backend web=./frontend --prd PROJECT_SPEC.md
+	```
 
 ## FastAPI Server & GitHub Action
 
@@ -93,6 +101,7 @@ pip install 'pmcursor[server]'
 - `POST /v1/checklist`
 - `POST /v1/canvas`
 - `POST /v1/release-notes`
+- `POST /v1/flags/audit`
 
 ### Composite GitHub Action
 
