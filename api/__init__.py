@@ -4,7 +4,7 @@ import hashlib
 import hmac
 import re
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict
 
@@ -86,6 +86,14 @@ class GitHubWebhookPayload(BaseModel):
     diff_text: str
     prd_path: str = "PRD.md"
     repo_root: str = "."
+
+
+class PublishCommentRequest(BaseModel):
+    provider: Literal["github", "linear", "jira"]
+    target: str
+    body: str
+    jira_base_url: str | None = None
+    dry_run: bool = True
 
 
 def audit_prd_against_repo(request: DriftAuditRequest) -> DriftReport:

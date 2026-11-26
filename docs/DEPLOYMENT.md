@@ -31,6 +31,9 @@ docker run -d \
 | `PMCURSOR_RATE_LIMIT_PER_MIN` | Per-client request rate limit per minute. Exceeding the limit returns HTTP `429 Too Many Requests` with a `Retry-After` header (`/health` and `/readyz` probes are exempt). | Unset |
 | `PMCURSOR_TRUST_PROXY` | Opt-in flag to resolve client IP addresses from `X-Forwarded-For` for rate limiting behind trusted reverse proxies. | Unset |
 | `PMCURSOR_CORS_ORIGINS` | Comma-separated list of allowed CORS origins for the FastAPI server (CORS disabled when unset). | Unset |
+| `GITHUB_TOKEN` | GitHub personal access token or installation token used by `POST /v1/publish` and `pmcursor publish` to post PR comments. | Unset |
+| `LINEAR_API_KEY` | Linear API key used by `POST /v1/publish` and `pmcursor publish` to post issue comments. | Unset |
+| `JIRA_API_TOKEN` | Jira API token used by `POST /v1/publish` and `pmcursor publish` to post issue comments. | Unset |
 | `WEB_CONCURRENCY` | Positive integer number of `uvicorn` worker processes. | `1` |
 | `PYTHONPATH` | Configured in the image as `/app/src:/app`. | `/app/src:/app` |
 

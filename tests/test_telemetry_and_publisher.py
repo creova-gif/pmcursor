@@ -309,3 +309,60 @@ def test_publisher_exhausting_max_retries_raises_final_error(
         )
 
     assert url_attempts == 3
+
+
+@pytest.mark.parametrize(
+    "blocked_url",
+    [
+        "http://169.254.169.254/latest/meta-data",
+        "http://127.0.0.1:8000",
+        "https://10.0.0.1",
+        "https://localhost",
+        "https://user:pass@example.com",
+    ],
+)
+def test_publisher_blocks_ssrf_and_embedded_credentials(blocked_url: str) -> None:
+    with pytest.raises(ValueError):
+        publish_jira_comment(blocked_url, "PROJ-1", "hi", dry_run=True)
+
+    with pytest.raises(ValueError):
+        publish_github_pr_comment("acme/app", 1, "hi", dry_run=True, api_base=blocked_url)
+
+    with pytest.raises(ValueError):
+        publish_linear_comment("ENG-1", "hi", dry_run=True, endpoint=blocked_url)
+
+
+def test_publisher_allow_private_urls_permits_local_http_but_still_rejects_credentials(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    captured: list[urllib.request.Request] = []
+
+    def fake_urlopen(req: urllib.request.Request, timeout: int = 15) -> MagicMock:
+        captured.append(req)
+        resp = MagicMock()
+        resp.__enter__.return_value = resp
+        resp.__exit__.return_value = False
+        resp.status = 201
+        return resp
+
+    monkeypatch.setattr(urllib.request, "urlopen", fake_urlopen)
+
+    result = publish_jira_comment(
+        "http://127.0.0.1:8000",
+        "PROJ-42",
+        "Local mock",
+        bearer_token="jira_local",
+        allow_private_urls=True,
+    )
+    assert result.status_code == 201
+    assert result.url == "http://127.0.0.1:8000/rest/api/2/issue/PROJ-42/comment"
+    assert len(captured) == 1
+
+    with pytest.raises(ValueError, match="embedded credentials"):
+        publish_jira_comment(
+            "https://user:pass@example.com",
+            "PROJ-42",
+            "Creds still blocked",
+            dry_run=True,
+            allow_private_urls=True,
+        )
