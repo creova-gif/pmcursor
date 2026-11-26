@@ -7,6 +7,7 @@ from collections.abc import Callable, Sequence
 from pathlib import Path
 
 from api import compute_pr_impact
+from pmcursor.checklists import generate_edge_case_checklist
 from pmcursor.drift import (
     check_spec_drift,
     fix_prd_markdown,
@@ -30,6 +31,7 @@ CLI_EPILOG = """Examples:
   python3 -m pmcursor.cli fix-prd --prd PROJECT_SPEC.md --repo . --dry-run
   python3 -m pmcursor.cli pr-impact --prd PROJECT_SPEC.md --repo . --base main
   python3 -m pmcursor.cli canvas --prd PROJECT_SPEC.md --repo . --output canvas.html
+  python3 -m pmcursor.cli checklist --repo . --prd PROJECT_SPEC.md --output checklist.md
   python3 -m pmcursor.cli ticket-sync --id ENG-42 --title "Add auth" --body-file ticket.md --repo .
   python3 -m pmcursor.cli serve --host 127.0.0.1 --port 8000
   python3 -m pmcursor.cli validate-plugin --repo .
@@ -213,6 +215,36 @@ def build_parser() -> argparse.ArgumentParser:
         "--json",
         action="store_true",
         help="Emit JSON summary of generated canvas",
+    )
+
+    checklist_parser = subparsers.add_parser(
+        "checklist",
+        help="Generate a RepoMap-backed edge-case and test checklist.",
+        epilog="Examples:\n  python3 -m pmcursor.cli checklist --repo .\n  python3 -m pmcursor.cli checklist --repo . --prd PROJECT_SPEC.md --output checklist.md",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
+    checklist_parser.add_argument(
+        "--repo",
+        type=Path,
+        default=Path("."),
+        help="Repository root directory (default: .)",
+    )
+    checklist_parser.add_argument(
+        "--prd",
+        type=Path,
+        default=None,
+        help="Optional path to a PRD markdown file for tailored edge cases",
+    )
+    checklist_parser.add_argument(
+        "--output",
+        type=Path,
+        default=None,
+        help="Optional file path to write the checklist output",
+    )
+    checklist_parser.add_argument(
+        "--json",
+        action="store_true",
+        help="Emit JSON EdgeCaseChecklist",
     )
 
     plugin_parser = subparsers.add_parser(
@@ -488,6 +520,43 @@ def main(argv: Sequence[str] | None = None) -> int:
             )
         else:
             print(f"Canvas written to {output_path.as_posix()} (score: {report.alignment_score.overall_score}/100)")
+        return 0
+
+    if args.command == "checklist":
+        repo_path = args.repo
+        if not repo_path.is_dir():
+            print(
+                f"Error: Repository directory '{repo_path}' does not exist.\n"
+                "  Try: python3 -m pmcursor.cli checklist --repo .",
+                file=sys.stderr,
+            )
+            return 2
+        prd_md_opt: str | None = None
+        if args.prd is not None:
+            prd_path = args.prd
+            if not prd_path.is_file():
+                print(
+                    f"Error: PRD file '{prd_path}' not found.\n"
+                    "  Try: python3 -m pmcursor.cli checklist --repo . --prd PROJECT_SPEC.md",
+                    file=sys.stderr,
+                )
+                return 2
+            prd_md_opt = prd_path.read_text(encoding="utf-8")
+
+        repo_map = index_repository(repo_path)
+        checklist = generate_edge_case_checklist(
+            repo_map,
+            prd_markdown=prd_md_opt,
+            repo_root=repo_path.resolve(),
+        )
+        output_text = checklist.model_dump_json(indent=2) if args.json else checklist.markdown
+        if args.output is not None:
+            output_path = args.output
+            output_path.parent.mkdir(parents=True, exist_ok=True)
+            content = output_text if output_text.endswith("\n") else output_text + "\n"
+            output_path.write_text(content, encoding="utf-8")
+        else:
+            print(output_text, end="" if output_text.endswith("\n") else "\n")
         return 0
 
     if args.command == "validate-plugin":

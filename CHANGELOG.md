@@ -2,6 +2,19 @@
 
 All notable changes to PMCursor are documented in this file.
 
+## [Unreleased]
+
+### Added
+
+- Added the FastAPI webhook server in `api/server.py` and the composite GitHub Action in `.github/actions/pmcursor-drift/action.yml`.
+- Added Linear and Jira ticket auditing in `src/pmcursor/tickets.py` with the `pmcursor ticket-sync` CLI subcommand and `pmcursor serve` to launch the API server.
+- Added the codebase-cited edge-case checklist generator in `src/pmcursor/checklists.py` with the `pmcursor checklist` CLI subcommand.
+- Added `/v1/tickets/audit`, `/v1/checklist`, and `/v1/canvas` endpoints to the FastAPI server.
+
+### Security & Hardening
+
+- Added a server bind guard requiring `PMCURSOR_API_TOKEN` when binding to non-loopback hosts, `WEB_CONCURRENCY` worker configuration, graceful CLI handling when `pmcursor[server]` extras are not installed, and Markdown table cell escaping.
+
 ## v0.1.0 (2026-11-25)
 
 ### Added

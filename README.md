@@ -45,6 +45,45 @@ PMCursor adapts plugin packaging and CLI conventions from [`cursor/plugins`](htt
 	```bash
 	PYTHONPATH=src python3 -m pmcursor.cli eval --json
 	```
+8. Audit a Linear or Jira ticket against repository contracts.
+	```bash
+	PYTHONPATH=src python3 -m pmcursor.cli ticket-sync --id ENG-42 --title "Add auth" --body-file ticket.md --repo .
+	```
+9. Generate a codebase-cited edge-case checklist from repository contracts and an optional PRD.
+	```bash
+	PYTHONPATH=src python3 -m pmcursor.cli checklist --repo . --prd PROJECT_SPEC.md
+	```
+10. Start the FastAPI server locally (requires `pmcursor[server]`).
+	```bash
+	PYTHONPATH=src python3 -m pmcursor.cli serve --host 127.0.0.1 --port 8000
+	```
+
+## FastAPI Server & GitHub Action
+
+Install the optional server dependencies before running `serve` or starting [api/server.py](api/server.py):
+
+```bash
+pip install 'pmcursor[server]'
+```
+
+### Configuration
+
+- `PMCURSOR_API_TOKEN`: Bearer token for API authentication. Required when binding `serve` to a non-loopback host (anything other than `127.0.0.1`, `localhost`, or `::1`).
+- `PMCURSOR_WEBHOOK_SECRET`: HMAC secret used to verify incoming GitHub webhook signatures.
+- `WEB_CONCURRENCY`: Number of Uvicorn worker processes.
+
+### Endpoints
+
+- `GET /health`
+- `POST /v1/drift/audit`
+- `POST /v1/webhooks/github`
+- `POST /v1/tickets/audit`
+- `POST /v1/checklist`
+- `POST /v1/canvas`
+
+### Composite GitHub Action
+
+Use [.github/actions/pmcursor-drift/action.yml](.github/actions/pmcursor-drift/action.yml) in CI workflows to run automated drift and PR impact checks on pull requests.
 
 ## Evaluation results
 
