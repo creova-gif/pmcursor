@@ -32,6 +32,9 @@ All notable changes to PMCursor are documented in this file.
 - Added `.env.example` and `docker-compose.yml` for local Docker Compose container startup and environment configuration.
 - Added `.github/workflows/release.yml` for tag-driven release automation and `SECURITY.md` for vulnerability reporting policy.
 - Added SARIF 2.1.0 export in `src/pmcursor/sarif.py` (`drift_report_to_sarif`) and the `--sarif` flag on `pmcursor drift` for GitHub Code Scanning integration.
+- Added `.github/CODEOWNERS`, `.github/dependabot.yml`, and `.github/workflows/security.yml` for repository ownership, automated dependency updates, and CI security scanning.
+- Added [docs/API_REFERENCE.md](docs/API_REFERENCE.md) documenting FastAPI authentication, error codes, security headers, HTTP endpoints, and MCP stdio tools.
+- Added `run_performance_benchmark` in `evals/benchmark.py` for throughput and latency benchmarking.
 
 ### Accessibility
 

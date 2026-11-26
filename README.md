@@ -163,7 +163,7 @@ Use [.github/actions/pmcursor-drift/action.yml](.github/actions/pmcursor-drift/a
 
 ## Evaluation results
 
-Run `PYTHONPATH=src python3 -m pmcursor.cli eval --json` to execute [src/pmcursor/eval_runner.py](src/pmcursor/eval_runner.py) against the seeded FastAPI and Pydantic fixture. The fixture contains 5 contract mismatches and 2 fabricated citations.
+Run `PYTHONPATH=src python3 -m pmcursor.cli eval --json` to execute [src/pmcursor/eval_runner.py](src/pmcursor/eval_runner.py) against the seeded FastAPI and Pydantic fixture. The fixture contains 5 contract mismatches and 2 fabricated citations. For throughput and latency benchmarking, run [evals/benchmark.py](evals/benchmark.py) (`run_performance_benchmark`).
 
 | Metric | Target | Result |
 |:---|:---|:---|
@@ -191,6 +191,7 @@ Contributions are welcome! See [CONTRIBUTING.md](CONTRIBUTING.md) for local setu
 - [ADR-001 on AST contract indexing](docs/adr/001-contract-first-repo-indexing.md)
 - [ADR-002 on plugin and skill architecture](docs/adr/002-cursor-plugin-and-gstack-skill-architecture.md)
 - [Roadmap](docs/ROADMAP.md)
+- [API reference](docs/API_REFERENCE.md)
 - [Deployment guide](docs/DEPLOYMENT.md)
 - [Security policy](SECURITY.md)
 - [Engineering standards](AGENTS.md) and [threat model](docs/THREAT_MODEL.md)
