@@ -17,12 +17,9 @@ This roadmap tracks completed engineering milestones and upcoming platform capab
 | `M9` | Linear & Jira Ticket Auditing & Webhooks | Added `src/pmcursor/tickets.py` (`pmcursor ticket-sync`, `audit_ticket_against_repo`), `POST /v1/tickets/audit`, `POST /v1/webhooks/linear`, and `POST /v1/webhooks/jira` with HMAC-SHA256 signature verification. |
 | `M10` | Codebase-Cited Edge-Case Checklists & Prisma/GraphQL Extractors | Added `src/pmcursor/checklists.py` (`pmcursor checklist`, `POST /v1/checklist`), `.prisma` and `.graphql`/`.gql` contract indexing, `EdgeCaseChecklist` canvas rendering, and `step-summary`/`checklist` GitHub Action inputs. |
 | `M11` | Release Notes Synthesizer & Scope Coverage Matrix | Added `src/pmcursor/release_notes.py` (`ScopeCoverageReport`, `ReleaseNotesReport`, `pmcursor release-notes`, `POST /v1/release-notes`) to synthesize diff-grounded release notes and quantify PRD-to-repo scope coverage. |
+| `M12` | MCP Server & Incremental Repo Cache | Added `src/pmcursor/mcp_server.py` (`PMCursorMCPServer`, `RepoIndexCache`, `run_mcp_server`, `pmcursor mcp`) and `.mcp.json` to expose PMCursor indexing, drift auditing, checklist generation, and release-notes synthesis over MCP with incremental repo caching. |
 
 ## Upcoming Milestones
-
-### `M12` — MCP Server & Live File Watcher
-- Expose PMCursor indexing, drift auditing, checklist generation, and release-notes synthesis as an MCP server for direct IDE and agent consumption.
-- Add an incremental file-watcher daemon so contract maps and drift diagnostics stay warm on every save without full-repo re-indexing.
 
 ### `M13` — Live Telemetry & Warehouse Verification (BigQuery / Langfuse / PostHog)
 - Extend static telemetry contract indexing with optional read-only verification against live BigQuery schemas, Langfuse traces/prompts, and PostHog event definitions.
@@ -31,3 +28,7 @@ This roadmap tracks completed engineering milestones and upcoming platform capab
 ### `M14` — Multi-Repo Federation & Bi-Directional PR/Linear Control Plane
 - Support cross-repository contract graphs (e.g., shared OpenAPI/GraphQL/Protobuf schemas across backend and frontend repos) in a unified `RepoMap`.
 - Enable bi-directional status synchronization and automated drift comments across GitHub pull requests and Linear/Jira issues.
+
+### `M15` — Feature Flag & Rollout Contract Verification
+- Index LaunchDarkly, Statsig, and Unleash feature flag contracts alongside existing codebase contracts.
+- Verify PRD rollout and rollback plans against active flag definitions and detect stale flag citations.

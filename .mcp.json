@@ -1,0 +1,11 @@
+{
+  "mcpServers": {
+    "pmcursor": {
+      "command": "python3",
+      "args": ["-m", "pmcursor.cli", "mcp"],
+      "env": {
+        "PYTHONPATH": "src"
+      }
+    }
+  }
+}

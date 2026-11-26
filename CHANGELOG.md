@@ -15,7 +15,8 @@ All notable changes to PMCursor are documented in this file.
 - Added `step-summary` and `checklist` inputs to `.github/actions/pmcursor-drift/action.yml` to publish Markdown drift reports and edge-case checklists to GitHub Step Summary.
 - Added optional `EdgeCaseChecklist` rendering in `render_split_pane_canvas` (`web/canvas.py`) with HTML escaping for all checklist fields.
 - Added the release notes synthesizer and PRD scope coverage matrix in `src/pmcursor/release_notes.py` (`ScopeCoverageReport`, `pmcursor release-notes`, and `POST /v1/release-notes`).
-- Added the project milestone roadmap in `docs/ROADMAP.md`.
+- Added the MCP server and incremental repository cache in `src/pmcursor/mcp_server.py` (`PMCursorMCPServer`, `RepoIndexCache`, `pmcursor mcp`) alongside `.mcp.json` for IDE/agent integration.
+- Added the project milestone roadmap in `docs/ROADMAP.md`, including the `M15` Feature Flag & Rollout Contract Verification milestone expansion.
 
 ### Security & Hardening
 

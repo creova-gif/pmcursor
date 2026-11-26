@@ -14,6 +14,11 @@ from pmcursor.drift import (
 )
 from pmcursor.eval_runner import run_eval_benchmark
 from pmcursor.indexer import index_repository
+from pmcursor.mcp_server import (
+    PMCursorMCPServer,
+    RepoIndexCache,
+    run_mcp_server,
+)
 from pmcursor.models import (
     ADRContract,
     DriftFinding,
@@ -57,11 +62,13 @@ __all__ = [
     "FieldContract",
     "FixPrdResult",
     "ModelContract",
+    "PMCursorMCPServer",
     "PRImpactItem",
     "PRImpactReport",
     "PluginValidationResult",
     "ReleaseNotesEntry",
     "ReleaseNotesReport",
+    "RepoIndexCache",
     "RepoMap",
     "RouteContract",
     "ScopeCoverageReport",
@@ -80,6 +87,7 @@ __all__ = [
     "healthcheck",
     "index_repository",
     "run_eval_benchmark",
+    "run_mcp_server",
     "validate_plugin_manifests",
 ]
 
