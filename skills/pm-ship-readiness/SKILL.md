@@ -22,7 +22,10 @@ Generate a codebase-cited edge-case QA checklist and audit sprint tickets before
 ```bash
 PYTHONPATH=src python3 -m pmcursor.cli checklist --repo . --prd PROJECT_SPEC.md
 PYTHONPATH=src python3 -m pmcursor.cli ticket-sync --id <TICKET-ID> --title "<Title>" --body-file <ticket.md> --repo .
+PYTHONPATH=src python3 -m pmcursor.cli release-notes --prd PROJECT_SPEC.md --repo . --base main --version v0.1.0
 ```
+
+Synthesize release notes and verify PRD scope coverage against the `main` diff before shipping.
 
 ## Checklist
 
