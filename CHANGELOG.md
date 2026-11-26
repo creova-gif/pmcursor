@@ -31,6 +31,11 @@ All notable changes to PMCursor are documented in this file.
 - Added `tests/test_release_consistency.py` to verify version parity across `pyproject.toml`, `.cursor-plugin/plugin.json`, and `.claude-plugin/plugin.json` and non-empty release files.
 - Added `.env.example` and `docker-compose.yml` for local Docker Compose container startup and environment configuration.
 - Added `.github/workflows/release.yml` for tag-driven release automation and `SECURITY.md` for vulnerability reporting policy.
+- Added SARIF 2.1.0 export in `src/pmcursor/sarif.py` (`drift_report_to_sarif`) and the `--sarif` flag on `pmcursor drift` for GitHub Code Scanning integration.
+
+### Accessibility
+
+- Added WCAG 2.1 AA accessibility enhancements in `web/canvas.py`, including semantic landmarks, skip-to-workspace navigation, `:focus-visible` focus rings, and live filter announcements.
 
 ### Performance
 

@@ -43,7 +43,7 @@ PMCursor adapts plugin packaging and CLI conventions from [`cursor/plugins`](htt
 	```bash
 	PYTHONPATH=src python3 -m pmcursor.cli index --repo . --json
 	```
-2. Audit a PRD for schema, route, and telemetry drift plus fabricated `file:line` citations.
+2. Audit a PRD for schema, route, and telemetry drift plus fabricated `file:line` citations (pass `--sarif` for SARIF 2.1.0 output compatible with GitHub Code Scanning).
 	```bash
 	PYTHONPATH=src python3 -m pmcursor.cli drift --prd PROJECT_SPEC.md --repo . --md
 	```
@@ -55,7 +55,7 @@ PMCursor adapts plugin packaging and CLI conventions from [`cursor/plugins`](htt
 	```bash
 	PYTHONPATH=src python3 -m pmcursor.cli pr-impact --prd PROJECT_SPEC.md --repo . --base main
 	```
-5. Generate an interactive split-pane HTML spec canvas (supports an optional `EdgeCaseChecklist` inspector pane in `web/canvas.py`).
+5. Generate an interactive split-pane HTML spec canvas (supports an optional `EdgeCaseChecklist` inspector pane in `web/canvas.py`, with WCAG 2.1 AA landmarks, skip-to-workspace navigation, `:focus-visible` rings, and live filter announcements).
 	```bash
 	PYTHONPATH=src python3 -m pmcursor.cli canvas --prd PROJECT_SPEC.md --repo . --output canvas.html
 	```

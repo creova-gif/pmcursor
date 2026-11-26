@@ -54,6 +54,25 @@ html, body {
 }
 .tabular { font-variant-numeric: tabular-nums; }
 .mono { font-family: var(--mono); }
+.skip-link {
+  position: fixed;
+  left: -9999px;
+  top: 12px;
+  z-index: 1000;
+  padding: 8px 14px;
+  border-radius: 9999px;
+  background: #60a5fa;
+  color: #0a0a0c;
+  font-size: 13px;
+  font-weight: 600;
+  text-decoration: none;
+}
+.skip-link:focus,
+.skip-link:focus-visible {
+  left: 12px;
+  outline: 2px solid #f4f4f6;
+  outline-offset: 2px;
+}
 .canvas-header {
   display: flex;
   flex-wrap: wrap;
@@ -119,7 +138,7 @@ html, body {
   height: 8px;
   border-radius: 9999px;
 }
-.split-pane {
+.split-workspace {
   display: grid;
   grid-template-columns: 1fr 1fr;
   gap: 16px;
@@ -128,7 +147,7 @@ html, body {
   margin: 0 auto;
 }
 @media (max-width: 960px) {
-  .split-pane {
+  .split-workspace {
     grid-template-columns: 1fr;
   }
 }
@@ -240,9 +259,13 @@ html, body {
   color: var(--text);
   font-family: var(--sans);
   font-size: 13px;
-  outline: none;
 }
 .search-input:focus { border-color: #525263; }
+.search-input:focus-visible {
+  outline: 2px solid #60a5fa;
+  outline-offset: 2px;
+  border-color: #60a5fa;
+}
 .search-input::placeholder { color: var(--muted); }
 .search-kbd {
   position: absolute;
@@ -346,18 +369,28 @@ html, body {
   color: var(--muted);
   font-size: 13px;
 }
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
 """
 
 _SCRIPT = """
 (function () {
   var input = document.getElementById("contract-search");
   var emptyState = document.getElementById("contracts-empty");
+  var statusEl = document.getElementById("contract-filter-status");
   if (!input) { return; }
 
   function applyFilter() {
     var query = input.value.trim().toLowerCase();
     var groups = document.querySelectorAll(".contract-group");
     var totalVisible = 0;
+    var totalCards = 0;
 
     for (var i = 0; i < groups.length; i++) {
       var group = groups[i];
@@ -365,6 +398,7 @@ _SCRIPT = """
       var groupVisible = 0;
       for (var j = 0; j < cards.length; j++) {
         var card = cards[j];
+        totalCards++;
         var haystack = card.getAttribute("data-search") || "";
         var matches = query === "" || haystack.indexOf(query) !== -1;
         card.hidden = !matches;
@@ -382,6 +416,10 @@ _SCRIPT = """
 
     if (emptyState) {
       emptyState.hidden = totalVisible !== 0;
+    }
+    if (statusEl) {
+      statusEl.textContent =
+        "Showing " + totalVisible + " of " + totalCards + " indexed contracts";
     }
   }
 
@@ -411,7 +449,7 @@ def _render_header(report: DriftReport) -> str:
     status_color = _STATUS_COLORS.get(report.status, "#9494a0")
     score = report.alignment_score.overall_score
     return (
-        '<header class="canvas-header">'
+        '<header class="canvas-header" role="banner">'
         '<div class="header-title-group">'
         '<span class="header-kicker">PMCursor Spec Canvas</span>'
         f'<span class="header-path">{_esc(report.prd_path)}</span>'
@@ -422,7 +460,7 @@ def _render_header(report: DriftReport) -> str:
         f'<span class="metric-value tabular">{score}/100</span>'
         "</div>"
         f'<div class="status-badge" style="color: {status_color};">'
-        f'<span class="status-dot" style="background: {status_color};"></span>'
+        f'<span class="status-dot" aria-hidden="true" style="background: {status_color};"></span>'
         f"<span>{_esc(report.status)}</span>"
         "</div>"
         '<div class="metric-chip">'
@@ -496,11 +534,11 @@ def _render_findings_table(findings: list[DriftFinding]) -> str:
         '<div class="findings-wrap">'
         '<table class="findings-table">'
         "<thead><tr>"
-        "<th>Severity</th>"
-        "<th>Category</th>"
-        "<th>Spec Reference</th>"
-        "<th>Code Citation</th>"
-        "<th>Message</th>"
+        '<th scope="col">Severity</th>'
+        '<th scope="col">Category</th>'
+        '<th scope="col">Spec Reference</th>'
+        '<th scope="col">Code Citation</th>'
+        '<th scope="col">Message</th>'
         "</tr></thead>"
         f"<tbody>{body}</tbody>"
         "</table>"
@@ -663,13 +701,18 @@ def _render_contracts_pane(
     checklist_html = _render_edge_case_checklist(checklist) if checklist is not None else ""
 
     return (
-        '<aside class="pane" aria-label="Codebase Contracts">'
-        '<h2 class="pane-heading">Codebase Contracts</h2>'
+        '<aside class="pane pane-right" aria-label="Codebase Contracts" '
+        'aria-labelledby="contracts-pane-heading">'
+        '<h2 id="contracts-pane-heading" class="pane-heading">Codebase Contracts</h2>'
         '<div class="search-bar">'
         '<input id="contract-search" class="search-input" type="search" '
         'placeholder="Filter models, routes, telemetry, ADRs..." '
-        'aria-label="Filter codebase contracts" />'
+        'aria-label="Filter indexed contracts" '
+        'aria-describedby="contract-filter-status" />'
         '<span class="search-kbd" aria-hidden="true">/</span>'
+        "</div>"
+        f'<div id="contract-filter-status" class="contract-count" aria-live="polite">'
+        f"Showing {total_cards} of {total_cards} indexed contracts"
         "</div>"
         f'<div class="contract-groups">{groups_html}</div>'
         f'<div id="contracts-empty" class="empty-state"{empty_hidden}>'
@@ -689,8 +732,9 @@ def render_split_pane_canvas(
 ) -> str:
     header_html = _render_header(report)
     left_pane = (
-        '<section class="pane" aria-label="Living PRD">'
-        '<h2 class="pane-heading">Living PRD</h2>'
+        '<section class="pane pane-left" aria-label="Living PRD" '
+        'aria-labelledby="prd-pane-heading">'
+        '<h2 id="prd-pane-heading" class="pane-heading">Living PRD</h2>'
         f"{_render_checklist(report.alignment_score)}"
         f"{_render_findings_table(report.findings)}"
         "<div>"
@@ -711,8 +755,9 @@ def render_split_pane_canvas(
         f"<style>{_STYLES}</style>"
         "</head>"
         "<body>"
+        '<a class="skip-link" href="#main-workspace">Skip to workspace</a>'
         f"{header_html}"
-        '<main class="split-pane">'
+        '<main id="main-workspace" class="split-workspace">'
         f"{left_pane}"
         f"{right_pane}"
         "</main>"

@@ -58,6 +58,7 @@ from pmcursor.release_notes import (
     compute_scope_coverage,
     generate_release_notes_and_coverage,
 )
+from pmcursor.sarif import drift_report_to_sarif
 from pmcursor.telemetry_verify import (
     ObservedTelemetryEvent,
     TelemetryDriftItem,
@@ -108,6 +109,7 @@ __all__ = [
     "audit_ticket_against_repo",
     "check_spec_drift",
     "compute_scope_coverage",
+    "drift_report_to_sarif",
     "extract_feature_flags",
     "fix_prd_markdown",
     "format_drift_report_markdown",

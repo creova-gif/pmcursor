@@ -36,6 +36,7 @@ from pmcursor.release_notes import (
     compute_scope_coverage,
     generate_release_notes_and_coverage,
 )
+from pmcursor.sarif import drift_report_to_sarif
 from pmcursor.telemetry_verify import verify_telemetry_samples
 from pmcursor.tickets import audit_ticket_against_repo
 from web.canvas import render_split_pane_canvas
@@ -122,6 +123,11 @@ def build_parser() -> argparse.ArgumentParser:
         "--md",
         action="store_true",
         help="Emit formatted Markdown report (default)",
+    )
+    drift_parser.add_argument(
+        "--sarif",
+        action="store_true",
+        help="Print SARIF 2.1.0 JSON report to stdout",
     )
     drift_parser.add_argument(
         "--fail-on-drift",
@@ -846,7 +852,9 @@ def main(argv: Sequence[str] | None = None) -> int:
             prd_path=prd_path.as_posix(),
             repo_root=repo_path.resolve(),
         )
-        if args.json:
+        if args.sarif:
+            print(json.dumps(drift_report_to_sarif(report), indent=2))
+        elif args.json:
             print(report.model_dump_json(indent=2))
         else:
             print(format_drift_report_markdown(report), end="")

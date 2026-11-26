@@ -118,3 +118,25 @@ All webhook endpoints (`/v1/webhooks/github`, `/v1/webhooks/linear`, `/v1/webhoo
 - Run as the non-root `pmcursor` user (configured in `Dockerfile`).
 - Terminate TLS at your ingress or load balancer; do not expose plaintext HTTP to the public internet.
 - Mount only the workspace directories you intend to audit, and avoid storing secrets in repository files.
+
+---
+
+## 4. GitHub Code Scanning (SARIF)
+
+You can export drift audit findings in SARIF 2.1.0 format using `pmcursor drift --sarif` and upload the resulting file to GitHub Code Scanning:
+
+```bash
+PYTHONPATH=src python3 -m pmcursor.cli drift --prd PROJECT_SPEC.md --repo . --sarif > pmcursor-drift.sarif
+```
+
+In a GitHub Actions workflow, upload `pmcursor-drift.sarif` with `github/codeql-action/upload-sarif` (requires `security-events: write` permission):
+
+```yaml
+- name: Run PMCursor drift audit (SARIF)
+  run: PYTHONPATH=src python3 -m pmcursor.cli drift --prd PROJECT_SPEC.md --repo . --sarif > pmcursor-drift.sarif
+
+- name: Upload SARIF to GitHub Code Scanning
+  uses: github/codeql-action/upload-sarif@v3
+  with:
+    sarif_file: pmcursor-drift.sarif
+```
