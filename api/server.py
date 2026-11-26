@@ -403,13 +403,28 @@ def create_app(
     metrics_lock = threading.Lock()
     total_requests = 0
     error_requests = 0
+    rate_limited_requests = 0
+    webhook_duplicate_deliveries = 0
+
+    def _check_duplicate_delivery(
+        provider: str, raw_delivery_id: str
+    ) -> dict[str, str] | None:
+        nonlocal webhook_duplicate_deliveries
+        delivery_id = raw_delivery_id.strip()
+        if delivery_id and not delivery_deduplicator.mark_if_new(
+            f"{provider}:{delivery_id}"
+        ):
+            with metrics_lock:
+                webhook_duplicate_deliveries += 1
+            return {"status": "duplicate", "delivery_id": delivery_id}
+        return None
 
     @fastapi_app.middleware("http")
     async def request_context_middleware(
         request: WebhookRequest,
         call_next: Callable[[WebhookRequest], Awaitable[Response]],
     ) -> Response:
-        nonlocal total_requests, error_requests
+        nonlocal total_requests, error_requests, rate_limited_requests
         incoming_id = request.headers.get("x-request-id", "").strip()
         request_id = incoming_id or str(uuid.uuid4())
         start = time.perf_counter()
@@ -459,6 +474,8 @@ def create_app(
             total_requests += 1
             if response.status_code >= 400:
                 error_requests += 1
+            if rate_limited:
+                rate_limited_requests += 1
         duration_ms = round((time.perf_counter() - start) * 1000.0, 2)
         response.headers["X-Request-ID"] = request_id
         response.headers["X-Process-Time-Ms"] = f"{duration_ms:.2f}"
@@ -491,6 +508,8 @@ def create_app(
         with metrics_lock:
             current_total_requests = total_requests
             current_error_requests = error_requests
+            rate_limited_count = rate_limited_requests
+            dup_count = webhook_duplicate_deliveries
         cache_hits = int(getattr(cache, "hits", 0))
         cache_misses = int(getattr(cache, "misses", 0))
         lines = [
@@ -500,6 +519,12 @@ def create_app(
             "# HELP pmcursor_http_errors_total Total HTTP error responses (status >= 400).",
             "# TYPE pmcursor_http_errors_total counter",
             f"pmcursor_http_errors_total {current_error_requests}",
+            "# HELP pmcursor_rate_limited_total Total HTTP requests rejected by rate limiting (429).",
+            "# TYPE pmcursor_rate_limited_total counter",
+            f"pmcursor_rate_limited_total {rate_limited_count}",
+            "# HELP pmcursor_webhook_duplicates_total Total duplicate webhook deliveries skipped.",
+            "# TYPE pmcursor_webhook_duplicates_total counter",
+            f"pmcursor_webhook_duplicates_total {dup_count}",
             "# HELP pmcursor_repo_cache_entries Number of cached repository maps.",
             "# TYPE pmcursor_repo_cache_entries gauge",
             f"pmcursor_repo_cache_entries {cache.size}",
@@ -703,9 +728,8 @@ def create_app(
             raise HTTPException(
                 status_code=401, detail="Invalid GitHub webhook signature"
             )
-        delivery_id = x_github_delivery.strip()
-        if delivery_id and not delivery_deduplicator.mark_if_new(f"github:{delivery_id}"):
-            return {"status": "duplicate", "delivery_id": delivery_id}
+        if (dup := _check_duplicate_delivery("github", x_github_delivery)) is not None:
+            return dup
         try:
             content_type = request.headers.get("content-type", "")
             data = _decode_webhook_json(payload_body, content_type)
@@ -760,9 +784,8 @@ def create_app(
             raise HTTPException(
                 status_code=401, detail="Invalid Linear webhook signature"
             )
-        delivery_id = linear_delivery.strip()
-        if delivery_id and not delivery_deduplicator.mark_if_new(f"linear:{delivery_id}"):
-            return {"status": "duplicate", "delivery_id": delivery_id}
+        if (dup := _check_duplicate_delivery("linear", linear_delivery)) is not None:
+            return dup
         data, root = _parse_webhook_dict_and_repo(
             payload_body,
             request.headers.get("content-type", ""),
@@ -805,9 +828,10 @@ def create_app(
                 )
         else:
             _require_auth(api_token, authorization, x_pmcursor_token)
-        delivery_id = x_atlassian_webhook_identifier.strip()
-        if delivery_id and not delivery_deduplicator.mark_if_new(f"jira:{delivery_id}"):
-            return {"status": "duplicate", "delivery_id": delivery_id}
+        if (
+            dup := _check_duplicate_delivery("jira", x_atlassian_webhook_identifier)
+        ) is not None:
+            return dup
         data, root = _parse_webhook_dict_and_repo(
             payload_body,
             request.headers.get("content-type", ""),
