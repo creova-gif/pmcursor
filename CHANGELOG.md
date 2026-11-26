@@ -26,6 +26,9 @@ All notable changes to PMCursor are documented in this file.
 - Added the `pmcursor doctor` diagnostic CLI subcommand in `src/pmcursor/cli.py` (with `--repo` and `--json`, reporting Python version, server extra availability, plugin manifest validity, and boolean secret configuration status without printing secret values).
 - Added `POST /v1/cache/clear` in `api/server.py` to clear cached repository indexes.
 - Added exponential-backoff retries on HTTP `429`, `5xx`, and `URLError` failures in `src/pmcursor/publisher.py`.
+- Added the `pmcursor publish` CLI subcommand to publish comments to GitHub PRs, Linear issues, and Jira issues.
+- Added `PMCURSOR_CORS_ORIGINS` configuration for allowed CORS origins in `api/server.py`.
+- Added `tests/test_release_consistency.py` to verify version parity across `pyproject.toml`, `.cursor-plugin/plugin.json`, and `.claude-plugin/plugin.json` and non-empty release files.
 
 ### Performance
 
@@ -37,6 +40,7 @@ All notable changes to PMCursor are documented in this file.
 - Added `_DeliveryDeduplicator` in `api/server.py` to deduplicate replayed webhooks via `X-GitHub-Delivery`, `Linear-Delivery`, and `X-Atlassian-Webhook-Identifier` (Jira) headers.
 - Added security response headers (`X-Content-Type-Options: nosniff`, `X-Frame-Options: DENY`, `Referrer-Policy: no-referrer`) in `api/server.py`.
 - Added `threading.RLock` locking to `RepoIndexCache` in `src/pmcursor/mcp_server.py` for thread-safe concurrent access.
+- Added `metrics_lock` synchronization for thread-safe request metrics updates in `api/server.py`.
 - Added a `2MB` webhook payload cap returning HTTP `413` on oversized webhook requests in `api/server.py`.
 - Added a server bind guard requiring `PMCURSOR_API_TOKEN` when binding to non-loopback hosts, `WEB_CONCURRENCY` worker configuration, graceful CLI handling when `pmcursor[server]` extras are not installed, and Markdown table cell escaping.
 

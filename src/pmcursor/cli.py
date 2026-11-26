@@ -26,6 +26,12 @@ from pmcursor.federation import index_federated_repos
 from pmcursor.indexer import index_repository
 from pmcursor.mcp_server import run_mcp_server
 from pmcursor.plugin_validator import validate_plugin_manifests
+from pmcursor.publisher import (
+    PublishResult,
+    publish_github_pr_comment,
+    publish_jira_comment,
+    publish_linear_comment,
+)
 from pmcursor.release_notes import (
     compute_scope_coverage,
     generate_release_notes_and_coverage,
@@ -540,6 +546,52 @@ def build_parser() -> argparse.ArgumentParser:
         help="Emit JSON diagnostic report",
     )
 
+    publish_parser = subparsers.add_parser(
+        "publish",
+        help="Publish a comment to a GitHub PR, Linear issue, or Jira issue.",
+        epilog=(
+            "Examples:\n"
+            "  python3 -m pmcursor.cli publish --provider github --target owner/repo#42 --body-file comment.md --dry-run\n"
+            "  python3 -m pmcursor.cli publish --provider linear --target ENG-42 --body-file comment.md --json\n"
+            "  python3 -m pmcursor.cli publish --provider jira --target ENG-42 --jira-base-url https://jira.example.com --body-file comment.md"
+        ),
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
+    publish_parser.add_argument(
+        "--provider",
+        choices=["github", "linear", "jira"],
+        required=True,
+        help="Target issue/PR provider",
+    )
+    publish_parser.add_argument(
+        "--target",
+        type=str,
+        required=True,
+        help="Target identifier (owner/repo#42 for github, ISSUE-ID for linear/jira)",
+    )
+    publish_parser.add_argument(
+        "--body-file",
+        type=Path,
+        required=True,
+        help="Path to markdown/text file containing the comment body",
+    )
+    publish_parser.add_argument(
+        "--jira-base-url",
+        type=str,
+        default=None,
+        help="Jira base URL (or set PMCURSOR_JIRA_BASE_URL)",
+    )
+    publish_parser.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="Validate and build payload without sending an HTTP request",
+    )
+    publish_parser.add_argument(
+        "--json",
+        action="store_true",
+        help="Emit JSON PublishResult",
+    )
+
     return parser
 
 
@@ -654,6 +706,105 @@ def _run_doctor(repo_path: Path, *, emit_json: bool) -> int:
             print(f"  {key:<{width}} : {value}")
 
     return 0 if plugin_valid else 1
+
+
+def _parse_github_pr_target(target: str) -> tuple[str, int]:
+    """Parse a GitHub PR target formatted as 'owner/repo#pr_number'."""
+    repo_part, sep, pr_part = target.partition("#")
+    owner, slash, repo = repo_part.partition("/")
+    if not sep or not slash or not owner.strip() or not repo.strip() or not pr_part.strip():
+        raise ValueError(
+            f"Invalid GitHub target '{target}'. Expected format 'owner/repo#pr_number'."
+        )
+    try:
+        pr_number = int(pr_part)
+    except ValueError as exc:
+        raise ValueError(
+            f"Invalid GitHub PR number in target '{target}': '{pr_part}' is not an integer."
+        ) from exc
+    if pr_number <= 0:
+        raise ValueError(
+            f"Invalid GitHub PR number in target '{target}': must be a positive integer."
+        )
+    return repo_part, pr_number
+
+
+def _run_publish(
+    *,
+    provider: str,
+    target: str,
+    body_file: Path,
+    jira_base_url: str | None,
+    dry_run: bool,
+    emit_json: bool,
+) -> int:
+    """Publish a comment to GitHub, Linear, or Jira from a markdown/text body file."""
+    if not body_file.is_file():
+        print(f"Error: Body file '{body_file}' not found.", file=sys.stderr)
+        return 2
+
+    try:
+        body = body_file.read_text(encoding="utf-8")
+        result: PublishResult
+        if provider == "github":
+            repo_full_name, pr_number = _parse_github_pr_target(target)
+            token = (
+                None
+                if dry_run
+                else (os.environ.get("GITHUB_TOKEN") or os.environ.get("PMCURSOR_GITHUB_TOKEN"))
+            )
+            result = publish_github_pr_comment(
+                repo_full_name,
+                pr_number,
+                body,
+                token=token,
+                dry_run=dry_run,
+            )
+        elif provider == "linear":
+            api_key = (
+                None
+                if dry_run
+                else (os.environ.get("LINEAR_API_KEY") or os.environ.get("PMCURSOR_LINEAR_API_KEY"))
+            )
+            result = publish_linear_comment(
+                target,
+                body,
+                api_key=api_key,
+                dry_run=dry_run,
+            )
+        elif provider == "jira":
+            resolved_base_url = (jira_base_url or os.environ.get("PMCURSOR_JIRA_BASE_URL") or "").strip()
+            if not resolved_base_url:
+                print(
+                    "Error: Missing Jira base URL. Pass --jira-base-url or set PMCURSOR_JIRA_BASE_URL.",
+                    file=sys.stderr,
+                )
+                return 2
+            bearer_token = (
+                None
+                if dry_run
+                else (os.environ.get("JIRA_API_TOKEN") or os.environ.get("PMCURSOR_JIRA_API_TOKEN"))
+            )
+            result = publish_jira_comment(
+                resolved_base_url,
+                target,
+                body,
+                bearer_token=bearer_token,
+                dry_run=dry_run,
+            )
+        else:
+            print(f"Error: Unsupported publish provider '{provider}'.", file=sys.stderr)
+            return 2
+    except (ValueError, RuntimeError, OSError) as exc:
+        print(f"Error: {exc}", file=sys.stderr)
+        return 2
+
+    if emit_json:
+        print(result.model_dump_json(indent=2))
+    else:
+        mode = "dry-run" if result.dry_run else "published"
+        print(f"[{mode}] {result.provider} {result.target_id} -> {result.url} (status={result.status_code})")
+    return 0
 
 
 def main(argv: Sequence[str] | None = None) -> int:
@@ -1165,6 +1316,16 @@ def main(argv: Sequence[str] | None = None) -> int:
 
     if args.command == "doctor":
         return _run_doctor(args.repo, emit_json=args.json)
+
+    if args.command == "publish":
+        return _run_publish(
+            provider=args.provider,
+            target=args.target,
+            body_file=args.body_file,
+            jira_base_url=args.jira_base_url,
+            dry_run=args.dry_run,
+            emit_json=args.json,
+        )
 
     return 2
 

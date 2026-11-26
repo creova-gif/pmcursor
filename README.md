@@ -107,6 +107,10 @@ PMCursor adapts plugin packaging and CLI conventions from [`cursor/plugins`](htt
 	```bash
 	PYTHONPATH=src python3 -m pmcursor.cli doctor --repo .
 	```
+18. Publish a drift report or comment to GitHub PRs, Linear issues, or Jira issues (supports `--dry-run`).
+	```bash
+	PYTHONPATH=src python3 -m pmcursor.cli publish --provider github --target owner/repo#42 --body-file report.md --dry-run
+	```
 
 ## FastAPI Server & GitHub Action
 
@@ -124,6 +128,7 @@ pip install 'pmcursor[server]'
 - `PMCURSOR_JIRA_WEBHOOK_SECRET`: HMAC-SHA256 secret used to verify incoming Jira webhook signatures (`X-Hub-Signature`); falls back to Bearer `PMCURSOR_API_TOKEN` when unset.
 - `PMCURSOR_RATE_LIMIT_PER_MIN`: Per-client request rate limit per minute (returns HTTP `429 Too Many Requests` with `Retry-After` when exceeded; `/health` and `/readyz` probes are exempt).
 - `PMCURSOR_TRUST_PROXY`: Opt-in flag to resolve client IP addresses from `X-Forwarded-For` for rate limiting behind trusted reverse proxies (disabled by default).
+- `PMCURSOR_CORS_ORIGINS`: Comma-separated list of allowed CORS origins for the FastAPI server (CORS middleware is disabled when unset).
 - `WEB_CONCURRENCY`: Number of Uvicorn worker processes.
 
 ### Endpoints
