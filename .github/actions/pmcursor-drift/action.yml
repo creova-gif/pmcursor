@@ -28,13 +28,19 @@ runs:
 
     - name: Install PMCursor
       shell: bash
-      run: pip install --no-cache-dir "${{ github.action_path }}/../../.."
+      env:
+        ACTION_PATH: ${{ github.action_path }}
+      run: pip install --no-cache-dir "$ACTION_PATH/../../.."
 
     - name: Run PMCursor drift check
       shell: bash
+      env:
+        INPUT_PRD: ${{ inputs.prd }}
+        INPUT_REPO: ${{ inputs.repo }}
+        INPUT_FAIL_ON_DRIFT: ${{ inputs.fail-on-drift }}
       run: |
-        ARGS=(drift --prd "${{ inputs.prd }}" --repo "${{ inputs.repo }}" --md)
-        if [ "${{ inputs.fail-on-drift }}" = "true" ]; then
+        ARGS=(drift --prd "$INPUT_PRD" --repo "$INPUT_REPO" --md)
+        if [ "$INPUT_FAIL_ON_DRIFT" = "true" ]; then
           ARGS+=(--fail-on-drift)
         fi
         pmcursor "${ARGS[@]}"
