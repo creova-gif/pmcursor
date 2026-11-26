@@ -30,6 +30,7 @@ All notable changes to PMCursor are documented in this file.
 - Added `PMCURSOR_CORS_ORIGINS` configuration for allowed CORS origins in `api/server.py`.
 - Added `tests/test_release_consistency.py` to verify version parity across `pyproject.toml`, `.cursor-plugin/plugin.json`, and `.claude-plugin/plugin.json` and non-empty release files.
 - Added `.env.example` and `docker-compose.yml` for local Docker Compose container startup and environment configuration.
+- Added `.github/workflows/release.yml` for tag-driven release automation and `SECURITY.md` for vulnerability reporting policy.
 
 ### Performance
 

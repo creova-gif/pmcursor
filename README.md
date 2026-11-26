@@ -182,7 +182,7 @@ ln -sfn "$(pwd)" ~/.cursor/plugins/local/pmcursor
 
 ## Contributing
 
-Contributions are welcome! See [CONTRIBUTING.md](CONTRIBUTING.md) for local setup, quality gates, and the pull request workflow. PMCursor is licensed under the [MIT License](LICENSE).
+Contributions are welcome! See [CONTRIBUTING.md](CONTRIBUTING.md) for local setup, quality gates, and the pull request workflow, and [SECURITY.md](SECURITY.md) for vulnerability reporting. PMCursor is licensed under the [MIT License](LICENSE).
 
 ## References
 
@@ -192,4 +192,5 @@ Contributions are welcome! See [CONTRIBUTING.md](CONTRIBUTING.md) for local setu
 - [ADR-002 on plugin and skill architecture](docs/adr/002-cursor-plugin-and-gstack-skill-architecture.md)
 - [Roadmap](docs/ROADMAP.md)
 - [Deployment guide](docs/DEPLOYMENT.md)
+- [Security policy](SECURITY.md)
 - [Engineering standards](AGENTS.md) and [threat model](docs/THREAT_MODEL.md)
