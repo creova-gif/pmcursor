@@ -26,6 +26,7 @@ from api import (
     FlagAuditRequest,
     GitHubWebhookPayload,
     OrgDashboardSummary,
+    PublishCommentRequest,
     ReleaseNotesRequest,
     TelemetryVerifyRequest,
     TicketAuditRequest,
@@ -45,6 +46,12 @@ from pmcursor.feature_flags import (
 )
 from pmcursor.mcp_server import RepoIndexCache
 from pmcursor.models import DriftReport, PRImpactReport
+from pmcursor.publisher import (
+    PublishResult,
+    publish_github_pr_comment,
+    publish_jira_comment,
+    publish_linear_comment,
+)
 from pmcursor.release_notes import (
     ReleaseNotesReport,
     compute_scope_coverage,
@@ -180,27 +187,39 @@ def _parse_webhook_dict_and_repo(
 
 
 class _SlidingWindowRateLimiter:
-    """Thread-safe per-client sliding-window rate limiter."""
+    """Thread-safe bounded-LRU per-client sliding-window rate limiter."""
 
-    def __init__(self, max_requests: int, window_seconds: float = 60.0) -> None:
+    def __init__(
+        self,
+        max_requests: int,
+        window_seconds: float = 60.0,
+        max_clients: int = 10_000,
+    ) -> None:
         if max_requests <= 0:
             raise ValueError("max_requests must be a positive integer")
         if window_seconds <= 0:
             raise ValueError("window_seconds must be positive")
+        if max_clients < 1:
+            raise ValueError("max_clients must be at least 1")
         self._max_requests = max_requests
         self._window_seconds = window_seconds
+        self._max_clients = max_clients
         self._lock = threading.Lock()
-        self._requests: dict[str, deque[float]] = {}
+        self._buckets: OrderedDict[str, deque[float]] = OrderedDict()
 
     def allow(self, client_key: str) -> bool:
         """Return True if the request is within the rate limit, False otherwise."""
         now = time.monotonic()
         cutoff = now - self._window_seconds
         with self._lock:
-            timestamps = self._requests.get(client_key)
+            timestamps = self._buckets.get(client_key)
             if timestamps is None:
                 timestamps = deque()
-                self._requests[client_key] = timestamps
+                self._buckets[client_key] = timestamps
+                if len(self._buckets) > self._max_clients:
+                    self._buckets.popitem(last=False)
+            else:
+                self._buckets.move_to_end(client_key)
             while timestamps and timestamps[0] <= cutoff:
                 timestamps.popleft()
             if len(timestamps) >= self._max_requests:
@@ -229,6 +248,78 @@ class _DeliveryDeduplicator:
             if len(self._seen) > self._max_entries:
                 self._seen.popitem(last=False)
             return True
+
+
+def _parse_github_pr_target(target: str) -> tuple[str, int]:
+    """Parse an 'owner/repo#pr_number' target string for GitHub PR publishing."""
+    repo_part, sep, pr_part = target.strip().partition("#")
+    if not sep or "/" not in repo_part or not pr_part.isdigit():
+        raise ValueError("GitHub publish target must be formatted as 'owner/repo#pr_number'")
+    owner, _, repo = repo_part.partition("/")
+    if not owner or not repo or "/" in repo:
+        raise ValueError("GitHub publish target must be formatted as 'owner/repo#pr_number'")
+    pr_number = int(pr_part)
+    if pr_number <= 0:
+        raise ValueError("GitHub PR number must be a positive integer")
+    return f"{owner}/{repo}", pr_number
+
+
+def _resolve_publish_token(primary_env: str, fallback_env: str) -> str | None:
+    for env_name in (primary_env, fallback_env):
+        value = os.environ.get(env_name, "").strip()
+        if value:
+            return value
+    return None
+
+
+def _dispatch_publish(payload: PublishCommentRequest) -> PublishResult:
+    """Dispatch a comment publish request to the configured provider."""
+    if payload.provider == "github":
+        repo_full_name, pr_number = _parse_github_pr_target(payload.target)
+        token = (
+            None
+            if payload.dry_run
+            else _resolve_publish_token("GITHUB_TOKEN", "PMCURSOR_GITHUB_TOKEN")
+        )
+        return publish_github_pr_comment(
+            repo_full_name,
+            pr_number,
+            payload.body,
+            token=token,
+            dry_run=payload.dry_run,
+        )
+    if payload.provider == "linear":
+        issue_id = payload.target.strip()
+        if not issue_id:
+            raise ValueError("Linear issue_id target must not be empty")
+        api_key = (
+            None
+            if payload.dry_run
+            else _resolve_publish_token("LINEAR_API_KEY", "PMCURSOR_LINEAR_API_KEY")
+        )
+        return publish_linear_comment(
+            issue_id,
+            payload.body,
+            api_key=api_key,
+            dry_run=payload.dry_run,
+        )
+    issue_key = payload.target.strip()
+    if not issue_key:
+        raise ValueError("Jira issue_key target must not be empty")
+    if not payload.jira_base_url or not payload.jira_base_url.strip():
+        raise ValueError("jira_base_url is required when publishing to Jira")
+    bearer_token = (
+        None
+        if payload.dry_run
+        else _resolve_publish_token("JIRA_API_TOKEN", "PMCURSOR_JIRA_API_TOKEN")
+    )
+    return publish_jira_comment(
+        payload.jira_base_url.strip(),
+        issue_key,
+        payload.body,
+        bearer_token=bearer_token,
+        dry_run=payload.dry_run,
+    )
 
 
 def _resolve_rate_limit(rate_limit_per_minute: int | None) -> int | None:
@@ -581,6 +672,20 @@ def create_app(
             p0_checklist_items=checklist.p0_count,
             status=drift_report.status,
         )
+
+    @fastapi_app.post("/v1/publish", response_model=PublishResult)
+    def publish_endpoint(
+        payload: PublishCommentRequest,
+        authorization: str = Header(default="", alias="Authorization"),
+        x_pmcursor_token: str = Header(default="", alias="X-PMCursor-Token"),
+    ) -> PublishResult:
+        _require_auth(api_token, authorization, x_pmcursor_token)
+        try:
+            return _dispatch_publish(payload)
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+        except (RuntimeError, OSError) as exc:
+            raise HTTPException(status_code=502, detail=str(exc)) from exc
 
     @fastapi_app.post("/v1/webhooks/github")
     async def github_webhook(

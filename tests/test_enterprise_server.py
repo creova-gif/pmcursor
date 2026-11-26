@@ -12,7 +12,12 @@ from typing import Any
 import pytest
 from fastapi.testclient import TestClient
 
-from api.server import MAX_REQUEST_BYTES, MAX_WEBHOOK_BYTES, create_app
+from api.server import (
+    MAX_REQUEST_BYTES,
+    MAX_WEBHOOK_BYTES,
+    _SlidingWindowRateLimiter,
+    create_app,
+)
 from pmcursor.indexer import index_repository
 from pmcursor.mcp_server import RepoIndexCache
 from pmcursor.models import RepoMap
@@ -462,3 +467,85 @@ def test_cors_origins_allowlist_and_disabled_by_default(
     )
     assert env_allowed.status_code == 200
     assert env_allowed.headers.get("access-control-allow-origin") == "https://admin.example.com"
+
+
+def test_sliding_window_rate_limiter_lru_eviction() -> None:
+    with pytest.raises(ValueError, match="max_clients"):
+        _SlidingWindowRateLimiter(max_requests=1, max_clients=0)
+
+    limiter = _SlidingWindowRateLimiter(max_requests=1, window_seconds=60.0, max_clients=2)
+    assert limiter.allow("c1") is True
+    assert limiter.allow("c1") is False
+    assert limiter.allow("c2") is True
+    # Touch c1 so c2 becomes the least recently used client bucket.
+    assert limiter.allow("c1") is False
+    # Adding c3 must evict c2 while keeping c1 rate-limited.
+    assert limiter.allow("c3") is True
+    assert limiter.allow("c1") is False
+    assert limiter.allow("c2") is True
+
+
+def test_publish_endpoint_auth_validation_and_dry_run() -> None:
+    app = create_app(api_token="publish-secret")
+    client = TestClient(app)
+    headers = {"Authorization": "Bearer publish-secret"}
+
+    unauth_resp = client.post(
+        "/v1/publish",
+        json={"provider": "github", "target": "acme/repo#12", "body": "LGTM"},
+    )
+    assert unauth_resp.status_code == 401
+
+    invalid_gh = client.post(
+        "/v1/publish",
+        json={"provider": "github", "target": "acme/repo", "body": "LGTM"},
+        headers=headers,
+    )
+    assert invalid_gh.status_code == 422
+
+    missing_jira_url = client.post(
+        "/v1/publish",
+        json={"provider": "jira", "target": "PROJ-12", "body": "Updated"},
+        headers=headers,
+    )
+    assert missing_jira_url.status_code == 422
+
+    gh_ok = client.post(
+        "/v1/publish",
+        json={"provider": "github", "target": "acme/repo#12", "body": "LGTM", "dry_run": True},
+        headers=headers,
+    )
+    assert gh_ok.status_code == 200
+    gh_data = gh_ok.json()
+    assert gh_data["provider"] == "github"
+    assert gh_data["target_id"] == "acme/repo#12"
+    assert gh_data["dry_run"] is True
+    assert gh_data["status_code"] == 0
+
+    linear_ok = client.post(
+        "/v1/publish",
+        json={"provider": "linear", "target": "LIN-99", "body": "Synced", "dry_run": True},
+        headers=headers,
+    )
+    assert linear_ok.status_code == 200
+    linear_data = linear_ok.json()
+    assert linear_data["provider"] == "linear"
+    assert linear_data["target_id"] == "LIN-99"
+    assert linear_data["dry_run"] is True
+
+    jira_ok = client.post(
+        "/v1/publish",
+        json={
+            "provider": "jira",
+            "target": "PROJ-12",
+            "body": "Synced",
+            "jira_base_url": "https://jira.example.com",
+            "dry_run": True,
+        },
+        headers=headers,
+    )
+    assert jira_ok.status_code == 200
+    jira_data = jira_ok.json()
+    assert jira_data["provider"] == "jira"
+    assert jira_data["target_id"] == "PROJ-12"
+    assert jira_data["dry_run"] is True

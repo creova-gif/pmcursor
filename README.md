@@ -147,6 +147,7 @@ pip install 'pmcursor[server]'
 - `POST /v1/release-notes`
 - `POST /v1/flags/audit`
 - `POST /v1/telemetry/verify`
+- `POST /v1/publish` (publish comments to GitHub PRs, Linear issues, or Jira issues)
 - `GET /v1/dashboard`
 
 ### Composite GitHub Action

@@ -1,10 +1,12 @@
 from __future__ import annotations
 
+import ipaddress
 import json
 import time
 import urllib.error
 import urllib.request
 from typing import Any, Literal
+from urllib.parse import urlparse
 
 from pydantic import BaseModel, ConfigDict
 
@@ -32,9 +34,37 @@ class PublishResult(BaseModel):
     body_preview: str
 
 
-def _validate_http_url(url: str) -> None:
-    if not url.startswith(("https://", "http://")):
-        raise ValueError(f"URL must start with https:// or http://, got: {url!r}")
+def _validate_outbound_url(url: str, *, allow_private_urls: bool = False) -> None:
+    """Validate an outbound webhook/API URL against SSRF and embedded credentials."""
+    parsed = urlparse(url)
+    if parsed.scheme not in {"https", "http"} or not parsed.hostname:
+        raise ValueError(
+            f"Outbound URL must use https:// or http:// with a valid hostname, got: {url!r}"
+        )
+    if parsed.username is not None or parsed.password is not None:
+        raise ValueError("Outbound URL must not contain embedded credentials")
+
+    if not allow_private_urls:
+        if parsed.scheme != "https":
+            raise ValueError("Outbound URL must use https:// unless allow_private_urls=True")
+        hostname = parsed.hostname.lower().rstrip(".")
+        if hostname in {"localhost", "localhost.localdomain"} or hostname.endswith(".local"):
+            raise ValueError(f"Outbound URL must not target local hostnames: {hostname!r}")
+        try:
+            ip = ipaddress.ip_address(hostname)
+        except ValueError:
+            ip = None
+        if ip is not None and (
+            ip.is_private
+            or ip.is_loopback
+            or ip.is_link_local
+            or ip.is_multicast
+            or ip.is_reserved
+            or ip.is_unspecified
+        ):
+            raise ValueError(
+                f"Outbound URL must not target private or reserved IP addresses: {hostname!r}"
+            )
 
 
 def _preview_body(body: str, limit: int = 120) -> str:
@@ -55,8 +85,9 @@ def _post_json(
     dry_run: bool,
     max_retries: int = 2,
     retry_delay_seconds: float = 0.25,
+    allow_private_urls: bool = False,
 ) -> PublishResult:
-    _validate_http_url(url)
+    _validate_outbound_url(url, allow_private_urls=allow_private_urls)
     preview = _preview_body(body_text)
     if dry_run:
         return PublishResult(
@@ -115,6 +146,7 @@ def publish_github_pr_comment(
     api_base: str = "https://api.github.com",
     max_retries: int = 2,
     retry_delay_seconds: float = 0.25,
+    allow_private_urls: bool = False,
 ) -> PublishResult:
     """Post a comment on a GitHub pull request via the Issues Comments API."""
     url = f"{api_base.rstrip('/')}/repos/{repo_full_name}/issues/{pr_number}/comments"
@@ -133,6 +165,7 @@ def publish_github_pr_comment(
         dry_run=dry_run,
         max_retries=max_retries,
         retry_delay_seconds=retry_delay_seconds,
+        allow_private_urls=allow_private_urls,
     )
 
 
@@ -145,6 +178,7 @@ def publish_linear_comment(
     endpoint: str = "https://api.linear.app/graphql",
     max_retries: int = 2,
     retry_delay_seconds: float = 0.25,
+    allow_private_urls: bool = False,
 ) -> PublishResult:
     """Post a comment on a Linear issue via the GraphQL commentCreate mutation."""
     headers = {"Authorization": api_key.strip() if api_key else ""}
@@ -163,6 +197,7 @@ def publish_linear_comment(
         dry_run=dry_run,
         max_retries=max_retries,
         retry_delay_seconds=retry_delay_seconds,
+        allow_private_urls=allow_private_urls,
     )
 
 
@@ -175,6 +210,7 @@ def publish_jira_comment(
     dry_run: bool = False,
     max_retries: int = 2,
     retry_delay_seconds: float = 0.25,
+    allow_private_urls: bool = False,
 ) -> PublishResult:
     """Post a comment on a Jira issue via the REST v2 issue comment endpoint."""
     url = f"{base_url.rstrip('/')}/rest/api/2/issue/{issue_key}/comment"
@@ -190,4 +226,5 @@ def publish_jira_comment(
         dry_run=dry_run,
         max_retries=max_retries,
         retry_delay_seconds=retry_delay_seconds,
+        allow_private_urls=allow_private_urls,
     )
