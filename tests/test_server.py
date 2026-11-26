@@ -87,6 +87,62 @@ def test_drift_audit_endpoint(tmp_path: Path) -> None:
     assert report.status == "DONE"
 
 
+def test_drift_audit_missing_repo_root_returns_404(tmp_path: Path) -> None:
+    app = create_app()
+    client = TestClient(app)
+
+    response = client.post(
+        "/v1/drift/audit",
+        json={
+            "prd_markdown": _sample_prd(),
+            "repo_root": str(tmp_path / "does-not-exist"),
+            "prd_path": "PRD.md",
+        },
+    )
+
+    assert response.status_code == 404
+
+
+def test_drift_audit_escaping_workspace_returns_403(tmp_path: Path) -> None:
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    outside = _create_sample_repo(tmp_path / "outside")
+    app = create_app(allowed_workspace_root=workspace)
+    client = TestClient(app)
+
+    response = client.post(
+        "/v1/drift/audit",
+        json={
+            "prd_markdown": _sample_prd(),
+            "repo_root": str(outside),
+            "prd_path": "PRD.md",
+        },
+    )
+
+    assert response.status_code == 403
+
+
+def test_drift_audit_requires_api_token_when_configured(tmp_path: Path) -> None:
+    repo_root = _create_sample_repo(tmp_path)
+    app = create_app(api_token="top-secret-token")
+    client = TestClient(app)
+    payload = {
+        "prd_markdown": _sample_prd(),
+        "repo_root": str(repo_root),
+        "prd_path": "PRD.md",
+    }
+
+    missing_response = client.post("/v1/drift/audit", json=payload)
+    wrong_response = client.post(
+        "/v1/drift/audit",
+        json=payload,
+        headers={"Authorization": "Bearer wrong-token"},
+    )
+
+    assert missing_response.status_code == 401
+    assert wrong_response.status_code == 401
+
+
 def test_github_webhook_invalid_signature(tmp_path: Path) -> None:
     repo_root = _create_sample_repo(tmp_path)
     secret = "whsec_test_secret"
@@ -195,6 +251,61 @@ def test_github_webhook_valid_payload(tmp_path: Path) -> None:
     assert any(item.name == "Order" for item in report.touched_contracts)
 
 
+def test_github_webhook_native_pull_request_accepted(tmp_path: Path) -> None:
+    secret = "whsec_test_secret"
+    app = create_app(webhook_secret=secret, allowed_workspace_root=tmp_path)
+    client = TestClient(app)
+
+    body = json.dumps(
+        {
+            "action": "opened",
+            "number": 42,
+            "pull_request": {
+                "number": 42,
+                "title": "Update Order model",
+                "html_url": "https://github.com/acme/repo/pull/42",
+            },
+            "repository": {"full_name": "acme/repo"},
+        }
+    ).encode("utf-8")
+
+    response = client.post(
+        "/v1/webhooks/github",
+        content=body,
+        headers={
+            "Content-Type": "application/json",
+            "X-GitHub-Event": "pull_request",
+            "X-Hub-Signature-256": _sign_payload(body, secret),
+        },
+    )
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data["status"] == "accepted"
+
+
+def test_github_webhook_ping_returns_pong(tmp_path: Path) -> None:
+    secret = "whsec_test_secret"
+    app = create_app(webhook_secret=secret, allowed_workspace_root=tmp_path)
+    client = TestClient(app)
+
+    body = json.dumps({"zen": "Keep it logically awesome.", "hook_id": 1}).encode("utf-8")
+
+    response = client.post(
+        "/v1/webhooks/github",
+        content=body,
+        headers={
+            "Content-Type": "application/json",
+            "X-GitHub-Event": "ping",
+            "X-Hub-Signature-256": _sign_payload(body, secret),
+        },
+    )
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data["status"] == "pong"
+
+
 def test_github_action_exists_and_invokes_drift() -> None:
     action_path = REPO_ROOT / ".github" / "actions" / "pmcursor-drift" / "action.yml"
 
@@ -202,3 +313,29 @@ def test_github_action_exists_and_invokes_drift() -> None:
     content = action_path.read_text(encoding="utf-8")
     assert "pmcursor" in content
     assert "drift" in content
+    assert "INPUT_PRD: ${{ inputs.prd }}" in content
+    assert "INPUT_REPO: ${{ inputs.repo }}" in content
+    assert "INPUT_FAIL_ON_DRIFT: ${{ inputs.fail-on-drift }}" in content
+    assert "ACTION_PATH: ${{ github.action_path }}" in content
+
+    run_lines: list[str] = []
+    in_run_block = False
+    run_indent = 0
+    for line in content.splitlines():
+        stripped = line.lstrip()
+        indent = len(line) - len(stripped)
+        if in_run_block:
+            if stripped and indent <= run_indent:
+                in_run_block = False
+            else:
+                run_lines.append(line)
+                continue
+        if stripped.startswith("run:"):
+            run_lines.append(stripped[len("run:") :])
+            if stripped.endswith(("|", ">")):
+                in_run_block = True
+                run_indent = indent
+
+    run_script = "\n".join(run_lines)
+    assert "${{ inputs." not in run_script
+    assert "${{ github.action_path }}" not in run_script
