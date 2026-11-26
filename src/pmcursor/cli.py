@@ -7,6 +7,7 @@ from collections.abc import Sequence
 from pathlib import Path
 
 from api import compute_pr_impact
+from api.server import run_server
 from pmcursor.drift import (
     check_spec_drift,
     fix_prd_markdown,
@@ -15,6 +16,7 @@ from pmcursor.drift import (
 from pmcursor.eval_runner import run_eval_benchmark
 from pmcursor.indexer import index_repository
 from pmcursor.plugin_validator import validate_plugin_manifests
+from pmcursor.tickets import audit_ticket_against_repo
 from web.canvas import render_split_pane_canvas
 
 CLI_EPILOG = """Examples:
@@ -23,6 +25,8 @@ CLI_EPILOG = """Examples:
   python3 -m pmcursor.cli fix-prd --prd PROJECT_SPEC.md --repo . --dry-run
   python3 -m pmcursor.cli pr-impact --prd PROJECT_SPEC.md --repo . --base main
   python3 -m pmcursor.cli canvas --prd PROJECT_SPEC.md --repo . --output canvas.html
+  python3 -m pmcursor.cli ticket-sync --id ENG-42 --title "Add auth" --body-file ticket.md --repo .
+  python3 -m pmcursor.cli serve --host 127.0.0.1 --port 8000
   python3 -m pmcursor.cli validate-plugin --repo .
   python3 -m pmcursor.cli eval --json
 """
@@ -236,6 +240,77 @@ def build_parser() -> argparse.ArgumentParser:
         help="Emit JSON evaluation result",
     )
 
+    ticket_parser = subparsers.add_parser(
+        "ticket-sync",
+        help="Audit a Linear or Jira ticket body against RepoMap contracts.",
+        epilog="Examples:\n  python3 -m pmcursor.cli ticket-sync --id ENG-42 --title \"Add auth\" --body-file ticket.md --repo .",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
+    ticket_parser.add_argument(
+        "--id",
+        type=str,
+        required=True,
+        help="Ticket identifier (e.g. ENG-42)",
+    )
+    ticket_parser.add_argument(
+        "--title",
+        type=str,
+        required=True,
+        help="Ticket title",
+    )
+    ticket_parser.add_argument(
+        "--body-file",
+        type=Path,
+        required=True,
+        help="Path to the markdown file containing the ticket description",
+    )
+    ticket_parser.add_argument(
+        "--provider",
+        choices=["linear", "jira"],
+        default="linear",
+        help="Ticket provider (default: linear)",
+    )
+    ticket_parser.add_argument(
+        "--repo",
+        type=Path,
+        default=Path("."),
+        help="Repository root directory (default: .)",
+    )
+    ticket_parser.add_argument(
+        "--json",
+        action="store_true",
+        help="Emit JSON TicketSyncReport",
+    )
+    ticket_parser.add_argument(
+        "--md",
+        action="store_true",
+        help="Emit formatted Markdown ticket comment (default)",
+    )
+    ticket_parser.add_argument(
+        "--fail-on-drift",
+        action="store_true",
+        help="Exit with code 1 if any drift finding or fabricated citation is detected",
+    )
+
+    serve_parser = subparsers.add_parser(
+        "serve",
+        help="Start the PMCursor FastAPI server.",
+        epilog="Examples:\n  python3 -m pmcursor.cli serve --host 127.0.0.1 --port 8000",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
+    serve_parser.add_argument(
+        "--host",
+        type=str,
+        default="127.0.0.1",
+        help="Bind host address (default: 127.0.0.1)",
+    )
+    serve_parser.add_argument(
+        "--port",
+        type=int,
+        default=8000,
+        help="Bind port number (default: 8000)",
+    )
+
     return parser
 
 
@@ -437,6 +512,47 @@ def main(argv: Sequence[str] | None = None) -> int:
                 f"Unflagged Fabricated: {bench.unflagged_fabricated_citations}"
             )
         return 0 if bench.passed else 1
+
+    if args.command == "ticket-sync":
+        body_path: Path = args.body_file
+        repo_path = args.repo
+        if not body_path.is_file():
+            print(
+                f"Error: Ticket body file '{body_path}' not found.\n"
+                "  Try: python3 -m pmcursor.cli ticket-sync --id ENG-42 --title \"Spec\" --body-file ticket.md --repo .",
+                file=sys.stderr,
+            )
+            return 2
+        if not repo_path.is_dir():
+            print(
+                f"Error: Repository directory '{repo_path}' does not exist.\n"
+                "  Try: python3 -m pmcursor.cli ticket-sync --id ENG-42 --title \"Spec\" --body-file ticket.md --repo .",
+                file=sys.stderr,
+            )
+            return 2
+
+        description = body_path.read_text(encoding="utf-8")
+        repo_map = index_repository(repo_path)
+        sync_report = audit_ticket_against_repo(
+            args.id,
+            args.title,
+            description,
+            repo_map,
+            provider=args.provider,
+            repo_root=repo_path.resolve(),
+        )
+        if args.json:
+            print(sync_report.model_dump_json(indent=2))
+        else:
+            print(sync_report.comment_markdown, end="")
+
+        if args.fail_on_drift and sync_report.drift_report.findings:
+            return 1
+        return 0
+
+    if args.command == "serve":
+        run_server(host=args.host, port=args.port)
+        return 0
 
     return 2
 
