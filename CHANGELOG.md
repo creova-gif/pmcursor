@@ -35,6 +35,11 @@ All notable changes to PMCursor are documented in this file.
 - Added `.github/CODEOWNERS`, `.github/dependabot.yml`, and `.github/workflows/security.yml` for repository ownership, automated dependency updates, and CI security scanning.
 - Added [docs/API_REFERENCE.md](docs/API_REFERENCE.md) documenting FastAPI authentication, error codes, security headers, HTTP endpoints, and MCP stdio tools.
 - Added `run_performance_benchmark` in `evals/benchmark.py` for throughput and latency benchmarking.
+- Added `pmcursor_rate_limited_total` and `pmcursor_webhook_duplicates_total` Prometheus counters on `GET /metrics` in `api/server.py`.
+
+### Changed
+
+- Extracted `build_parser` into `src/pmcursor/_cli_parser.py` for maintainability.
 
 ### Accessibility
 

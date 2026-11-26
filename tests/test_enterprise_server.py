@@ -549,3 +549,81 @@ def test_publish_endpoint_auth_validation_and_dry_run() -> None:
     assert jira_data["provider"] == "jira"
     assert jira_data["target_id"] == "PROJ-12"
     assert jira_data["dry_run"] is True
+
+
+def test_metrics_tracks_rate_limited_and_duplicate_webhooks(tmp_path: Path) -> None:
+    repo = _create_sample_repo(tmp_path)
+    gh_secret = "gh-secret"
+    lin_secret = "lin-secret"
+    jira_secret = "jira-secret"
+    app = create_app(
+        rate_limit_per_minute=2,
+        trust_proxy=True,
+        webhook_secret=gh_secret,
+        linear_webhook_secret=lin_secret,
+        jira_webhook_secret=jira_secret,
+        allowed_workspace_root=tmp_path,
+    )
+    client = TestClient(app)
+
+    gh_body = json.dumps({"zen": "Keep it logically awesome.", "hook_id": 1}).encode(
+        "utf-8"
+    )
+    gh_sig = (
+        "sha256="
+        + hmac.new(gh_secret.encode("utf-8"), gh_body, hashlib.sha256).hexdigest()
+    )
+    gh_headers = {
+        "Content-Type": "application/json",
+        "X-Hub-Signature-256": gh_sig,
+        "X-GitHub-Delivery": "dup-gh-1",
+        "X-Forwarded-For": "203.0.113.10",
+    }
+    assert client.post("/v1/webhooks/github", content=gh_body, headers=gh_headers).status_code == 200
+    gh_dup = client.post("/v1/webhooks/github", content=gh_body, headers=gh_headers)
+    assert gh_dup.status_code == 200
+    assert gh_dup.json()["status"] == "duplicate"
+    # 3rd request from 203.0.113.10 exceeds rate_limit_per_minute=2
+    assert (
+        client.post("/v1/webhooks/github", content=gh_body, headers=gh_headers).status_code
+        == 429
+    )
+
+    lin_body = json.dumps(
+        {"type": "Comment", "repo_root": str(repo), "data": {"id": "1"}}
+    ).encode("utf-8")
+    lin_sig = hmac.new(lin_secret.encode("utf-8"), lin_body, hashlib.sha256).hexdigest()
+    lin_headers = {
+        "Content-Type": "application/json",
+        "Linear-Signature": lin_sig,
+        "Linear-Delivery": "dup-lin-1",
+        "X-Forwarded-For": "203.0.113.11",
+    }
+    assert client.post("/v1/webhooks/linear", content=lin_body, headers=lin_headers).status_code == 200
+    lin_dup = client.post("/v1/webhooks/linear", content=lin_body, headers=lin_headers)
+    assert lin_dup.status_code == 200
+    assert lin_dup.json()["status"] == "duplicate"
+
+    jira_body = json.dumps(
+        {"webhookEvent": "jira:issue_deleted", "repo_root": str(repo)}
+    ).encode("utf-8")
+    jira_sig = (
+        "sha256="
+        + hmac.new(jira_secret.encode("utf-8"), jira_body, hashlib.sha256).hexdigest()
+    )
+    jira_headers = {
+        "Content-Type": "application/json",
+        "X-Hub-Signature": jira_sig,
+        "X-Atlassian-Webhook-Identifier": "dup-jira-1",
+        "X-Forwarded-For": "203.0.113.12",
+    }
+    assert client.post("/v1/webhooks/jira", content=jira_body, headers=jira_headers).status_code == 200
+    jira_dup = client.post("/v1/webhooks/jira", content=jira_body, headers=jira_headers)
+    assert jira_dup.status_code == 200
+    assert jira_dup.json()["status"] == "duplicate"
+
+    metrics_resp = client.get("/metrics", headers={"X-Forwarded-For": "203.0.113.99"})
+    assert metrics_resp.status_code == 200
+    body = metrics_resp.text
+    assert "pmcursor_rate_limited_total 1" in body
+    assert "pmcursor_webhook_duplicates_total 3" in body
