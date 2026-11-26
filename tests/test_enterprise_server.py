@@ -326,3 +326,86 @@ def test_github_and_linear_webhook_delivery_deduplication(tmp_path: Path) -> Non
     assert lin_first.json() == {"status": "ignored", "event_type": "Comment"}
     assert lin_second.status_code == 200
     assert lin_second.json() == {"status": "duplicate", "delivery_id": "lin-deliv-1"}
+
+
+def test_cache_clear_endpoint_requires_auth_and_clears_cache(tmp_path: Path) -> None:
+    repo = _create_sample_repo(tmp_path)
+    cache = RepoIndexCache()
+    app = create_app(api_token="top-secret", repo_cache=cache)
+    client = TestClient(app)
+    auth_headers = {"Authorization": "Bearer top-secret"}
+
+    audit_resp = client.post(
+        "/v1/drift/audit",
+        json={
+            "repo_root": str(repo),
+            "prd_markdown": "# PRD\n\n- User model\n",
+            "prd_path": "PRD.md",
+        },
+        headers=auth_headers,
+    )
+    assert audit_resp.status_code == 200
+    assert client.get("/readyz").json() == {"status": "ready", "cached_repos": 1}
+
+    unauth_clear = client.post("/v1/cache/clear")
+    assert unauth_clear.status_code == 401
+    assert cache.size == 1
+
+    clear_resp = client.post("/v1/cache/clear", headers=auth_headers)
+    assert clear_resp.status_code == 200
+    clear_data = clear_resp.json()
+    assert clear_data["status"] == "cleared"
+    assert clear_data["cleared_entries"] >= 1
+    assert client.get("/readyz").json() == {"status": "ready", "cached_repos": 0}
+
+
+def test_trust_proxy_rate_limits_by_x_forwarded_for(tmp_path: Path) -> None:
+    repo = _create_sample_repo(tmp_path)
+    app = create_app(rate_limit_per_minute=1, trust_proxy=True)
+    client = TestClient(app)
+
+    payload: dict[str, Any] = {
+        "repo_root": str(repo),
+        "prd_markdown": "# PRD\n\n- User model\n",
+        "prd_path": "PRD.md",
+    }
+    ip1_headers = {"X-Forwarded-For": "203.0.113.10, 10.0.0.1"}
+    ip2_headers = {"X-Forwarded-For": "203.0.113.20"}
+
+    assert client.post("/v1/drift/audit", json=payload, headers=ip1_headers).status_code == 200
+    assert client.post("/v1/drift/audit", json=payload, headers=ip1_headers).status_code == 429
+    assert client.post("/v1/drift/audit", json=payload, headers=ip2_headers).status_code == 200
+    assert client.post("/v1/drift/audit", json=payload, headers=ip2_headers).status_code == 429
+
+
+def test_jira_webhook_delivery_deduplication(tmp_path: Path) -> None:
+    repo = _create_sample_repo(tmp_path)
+    jira_secret = "jira-secret"
+    app = create_app(
+        jira_webhook_secret=jira_secret,
+        allowed_workspace_root=tmp_path,
+    )
+    client = TestClient(app)
+
+    jira_body = json.dumps(
+        {
+            "webhookEvent": "jira:comment_created",
+            "repo_root": str(repo),
+            "issue": {"key": "PROJ-42", "fields": {"summary": "Test", "description": "Desc"}},
+        }
+    ).encode("utf-8")
+    jira_sig = (
+        "sha256="
+        + hmac.new(jira_secret.encode("utf-8"), jira_body, hashlib.sha256).hexdigest()
+    )
+    jira_headers = {
+        "Content-Type": "application/json",
+        "X-Hub-Signature": jira_sig,
+        "X-Atlassian-Webhook-Identifier": "jira-deliv-1",
+    }
+    first = client.post("/v1/webhooks/jira", content=jira_body, headers=jira_headers)
+    second = client.post("/v1/webhooks/jira", content=jira_body, headers=jira_headers)
+    assert first.status_code == 200
+    assert first.json()["ticket_id"] == "PROJ-42"
+    assert second.status_code == 200
+    assert second.json() == {"status": "duplicate", "delivery_id": "jira-deliv-1"}

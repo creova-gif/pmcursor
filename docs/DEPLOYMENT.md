@@ -29,6 +29,7 @@ docker run -d \
 | --- | --- | --- |
 | `PMCURSOR_API_TOKEN` | Bearer / `X-PMCursor-Token` secret required by authenticated `/v1/*` endpoints. | Unset |
 | `PMCURSOR_RATE_LIMIT_PER_MIN` | Per-client request rate limit per minute. Exceeding the limit returns HTTP `429 Too Many Requests` with a `Retry-After` header (`/health` and `/readyz` probes are exempt). | Unset |
+| `PMCURSOR_TRUST_PROXY` | Opt-in flag to resolve client IP addresses from `X-Forwarded-For` for rate limiting behind trusted reverse proxies. | Unset |
 | `WEB_CONCURRENCY` | Positive integer number of `uvicorn` worker processes. | `1` |
 | `PYTHONPATH` | Configured in the image as `/app/src:/app`. | `/app/src:/app` |
 
@@ -46,6 +47,8 @@ The server exposes two unauthenticated probe endpoints for container orchestrato
 - **Readiness (`GET /readyz`)**
   - Returns HTTP `200` with `{"status": "ready", "cached_repos": <int>}`.
   - Indicates the application is ready to serve traffic and reports the number of cached repository indexes.
+- **Cache Clear (`POST /v1/cache/clear`)**
+  - Authenticated endpoint (requires `PMCURSOR_API_TOKEN` when configured) that clears the in-memory `RepoIndexCache` so subsequent requests re-index repositories from disk.
 
 Example Kubernetes probe configuration:
 
@@ -98,6 +101,7 @@ All webhook endpoints (`/v1/webhooks/github`, `/v1/webhooks/linear`, `/v1/webhoo
 ### Additional Hardening
 
 - Configure `PMCURSOR_RATE_LIMIT_PER_MIN` to enforce per-client rate limiting (returning `429 Too Many Requests` with `Retry-After`; `/health` and `/readyz` probes are exempt).
+- Enable `PMCURSOR_TRUST_PROXY` only when running behind a trusted reverse proxy or load balancer so rate limiting resolves client IPs from `X-Forwarded-For` instead of the proxy socket address. Leave it unset when directly exposed to prevent `X-Forwarded-For` spoofing.
 - Run as the non-root `pmcursor` user (configured in `Dockerfile`).
 - Terminate TLS at your ingress or load balancer; do not expose plaintext HTTP to the public internet.
 - Mount only the workspace directories you intend to audit, and avoid storing secrets in repository files.

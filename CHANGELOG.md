@@ -24,6 +24,8 @@ All notable changes to PMCursor are documented in this file.
 - Added `GET /readyz` readiness probe (reporting cached repository count) and `X-Request-ID` / `X-Process-Time-Ms` observability middleware in `api/server.py`.
 - Added production container packaging (`Dockerfile`, `.dockerignore`), [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md), and a Python `3.11`/`3.12` CI test matrix in `.github/workflows/ci.yml`.
 - Added the `pmcursor doctor` diagnostic CLI subcommand in `src/pmcursor/cli.py` (with `--repo` and `--json`, reporting Python version, server extra availability, plugin manifest validity, and boolean secret configuration status without printing secret values).
+- Added `POST /v1/cache/clear` in `api/server.py` to clear cached repository indexes.
+- Added exponential-backoff retries on HTTP `429`, `5xx`, and `URLError` failures in `src/pmcursor/publisher.py`.
 
 ### Performance
 
@@ -31,8 +33,8 @@ All notable changes to PMCursor are documented in this file.
 
 ### Security
 
-- Added `_SlidingWindowRateLimiter` (`PMCURSOR_RATE_LIMIT_PER_MIN`) in `api/server.py` returning HTTP `429` with `Retry-After` when exceeded (`/health` and `/readyz` probes exempt).
-- Added `_DeliveryDeduplicator` in `api/server.py` to deduplicate replayed webhooks via `X-GitHub-Delivery` and `Linear-Delivery` headers.
+- Added `_SlidingWindowRateLimiter` (`PMCURSOR_RATE_LIMIT_PER_MIN`) in `api/server.py` returning HTTP `429` with `Retry-After` when exceeded (`/health` and `/readyz` probes exempt), with opt-in `PMCURSOR_TRUST_PROXY` support for `X-Forwarded-For` client IP resolution behind reverse proxies.
+- Added `_DeliveryDeduplicator` in `api/server.py` to deduplicate replayed webhooks via `X-GitHub-Delivery`, `Linear-Delivery`, and `X-Atlassian-Webhook-Identifier` (Jira) headers.
 - Added security response headers (`X-Content-Type-Options: nosniff`, `X-Frame-Options: DENY`, `Referrer-Policy: no-referrer`) in `api/server.py`.
 - Added `threading.RLock` locking to `RepoIndexCache` in `src/pmcursor/mcp_server.py` for thread-safe concurrent access.
 - Added a `2MB` webhook payload cap returning HTTP `413` on oversized webhook requests in `api/server.py`.

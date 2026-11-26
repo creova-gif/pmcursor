@@ -248,6 +248,17 @@ def _resolve_rate_limit(rate_limit_per_minute: int | None) -> int | None:
     return parsed
 
 
+def _extract_client_ip(request: WebhookRequest, *, trust_proxy: bool) -> str:
+    """Resolve client IP from X-Forwarded-For when trust_proxy is enabled."""
+    if trust_proxy:
+        forwarded_for = request.headers.get("x-forwarded-for", "").strip()
+        if forwarded_for:
+            first_ip = forwarded_for.split(",", 1)[0].strip()
+            if first_ip:
+                return first_ip
+    return request.client.host if request.client is not None else "unknown"
+
+
 def create_app(
     *,
     webhook_secret: str | None = None,
@@ -257,11 +268,18 @@ def create_app(
     api_token: str | None = None,
     repo_cache: RepoIndexCache | None = None,
     rate_limit_per_minute: int | None = None,
+    trust_proxy: bool | None = None,
 ) -> FastAPI:
     """Create and configure the PMCursor FastAPI application."""
     fastapi_app = FastAPI(title="PMCursor API")
     cache = repo_cache if repo_cache is not None else RepoIndexCache()
     effective_rate_limit = _resolve_rate_limit(rate_limit_per_minute)
+    effective_trust_proxy = (
+        trust_proxy
+        if trust_proxy is not None
+        else os.environ.get("PMCURSOR_TRUST_PROXY", "").strip().lower()
+        in {"1", "true", "yes"}
+    )
     rate_limiter = (
         _SlidingWindowRateLimiter(effective_rate_limit)
         if effective_rate_limit is not None
@@ -284,7 +302,9 @@ def create_app(
         is_probe = request.method == "GET" and request.url.path in {"/health", "/readyz"}
         rate_limited = False
         if rate_limiter is not None and not is_probe:
-            client_ip = request.client.host if request.client is not None else "unknown"
+            client_ip = _extract_client_ip(
+                request, trust_proxy=effective_trust_proxy
+            )
             if not rate_limiter.allow(client_ip):
                 rate_limited = True
 
@@ -375,6 +395,16 @@ def create_app(
             content="\n".join(lines) + "\n",
             media_type="text/plain; version=0.0.4; charset=utf-8",
         )
+
+    @fastapi_app.post("/v1/cache/clear")
+    def clear_cache(
+        authorization: str = Header(default="", alias="Authorization"),
+        x_pmcursor_token: str = Header(default="", alias="X-PMCursor-Token"),
+    ) -> dict[str, Any]:
+        _require_auth(api_token, authorization, x_pmcursor_token)
+        cleared = cache.size
+        cache.clear()
+        return {"status": "cleared", "cleared_entries": cleared}
 
     @fastapi_app.post("/v1/drift/audit")
     def drift_audit(
@@ -625,6 +655,9 @@ def create_app(
         x_hub_signature: str = Header(default="", alias="X-Hub-Signature"),
         authorization: str = Header(default="", alias="Authorization"),
         x_pmcursor_token: str = Header(default="", alias="X-PMCursor-Token"),
+        x_atlassian_webhook_identifier: str = Header(
+            default="", alias="X-Atlassian-Webhook-Identifier"
+        ),
     ) -> TicketSyncReport | dict[str, Any]:
         payload_body = await _read_bounded_webhook_body(request)
         jira_secret = (
@@ -639,6 +672,9 @@ def create_app(
                 )
         else:
             _require_auth(api_token, authorization, x_pmcursor_token)
+        delivery_id = x_atlassian_webhook_identifier.strip()
+        if delivery_id and not delivery_deduplicator.mark_if_new(f"jira:{delivery_id}"):
+            return {"status": "duplicate", "delivery_id": delivery_id}
         data, root = _parse_webhook_dict_and_repo(
             payload_body,
             request.headers.get("content-type", ""),

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import time
 import urllib.error
 import urllib.request
 from typing import Any, Literal
@@ -8,6 +9,8 @@ from typing import Any, Literal
 from pydantic import BaseModel, ConfigDict
 
 PublishProvider = Literal["github", "linear", "jira"]
+
+_RETRYABLE_HTTP_STATUS_CODES = frozenset({429, 502, 503, 504})
 
 _LINEAR_COMMENT_MUTATION = """
 mutation CommentCreate($issueId: String!, $body: String!) {
@@ -50,6 +53,8 @@ def _post_json(
     body_text: str,
     token: str | None,
     dry_run: bool,
+    max_retries: int = 2,
+    retry_delay_seconds: float = 0.25,
 ) -> PublishResult:
     _validate_http_url(url)
     preview = _preview_body(body_text)
@@ -65,15 +70,30 @@ def _post_json(
 
     if token is None or not token.strip():
         raise ValueError(f"Missing authentication token for {provider} publish.")
+    if max_retries < 0:
+        raise ValueError(f"max_retries must be non-negative, got: {max_retries}")
 
     data = json.dumps(payload).encode("utf-8")
     request_headers = {"Content-Type": "application/json", **headers}
     req = urllib.request.Request(url=url, data=data, headers=request_headers, method="POST")
-    try:
-        with urllib.request.urlopen(req, timeout=15) as resp:
-            status_code = int(getattr(resp, "status", 200))
-    except urllib.error.HTTPError as exc:
-        raise RuntimeError(f"{provider} API returned HTTP {exc.code}: {exc.reason}") from exc
+
+    status_code = 0
+    for attempt in range(max_retries + 1):
+        try:
+            with urllib.request.urlopen(req, timeout=15) as resp:
+                status_code = int(getattr(resp, "status", 200))
+            break
+        except urllib.error.HTTPError as exc:
+            if exc.code not in _RETRYABLE_HTTP_STATUS_CODES or attempt >= max_retries:
+                raise RuntimeError(
+                    f"{provider} API returned HTTP {exc.code}: {exc.reason}"
+                ) from exc
+        except urllib.error.URLError:
+            if attempt >= max_retries:
+                raise
+
+        if retry_delay_seconds > 0:
+            time.sleep(retry_delay_seconds * (2**attempt))
 
     return PublishResult(
         provider=provider,
@@ -93,6 +113,8 @@ def publish_github_pr_comment(
     token: str | None = None,
     dry_run: bool = False,
     api_base: str = "https://api.github.com",
+    max_retries: int = 2,
+    retry_delay_seconds: float = 0.25,
 ) -> PublishResult:
     """Post a comment on a GitHub pull request via the Issues Comments API."""
     url = f"{api_base.rstrip('/')}/repos/{repo_full_name}/issues/{pr_number}/comments"
@@ -109,6 +131,8 @@ def publish_github_pr_comment(
         body_text=body,
         token=token,
         dry_run=dry_run,
+        max_retries=max_retries,
+        retry_delay_seconds=retry_delay_seconds,
     )
 
 
@@ -119,6 +143,8 @@ def publish_linear_comment(
     api_key: str | None = None,
     dry_run: bool = False,
     endpoint: str = "https://api.linear.app/graphql",
+    max_retries: int = 2,
+    retry_delay_seconds: float = 0.25,
 ) -> PublishResult:
     """Post a comment on a Linear issue via the GraphQL commentCreate mutation."""
     headers = {"Authorization": api_key.strip() if api_key else ""}
@@ -135,6 +161,8 @@ def publish_linear_comment(
         body_text=body,
         token=api_key,
         dry_run=dry_run,
+        max_retries=max_retries,
+        retry_delay_seconds=retry_delay_seconds,
     )
 
 
@@ -145,6 +173,8 @@ def publish_jira_comment(
     *,
     bearer_token: str | None = None,
     dry_run: bool = False,
+    max_retries: int = 2,
+    retry_delay_seconds: float = 0.25,
 ) -> PublishResult:
     """Post a comment on a Jira issue via the REST v2 issue comment endpoint."""
     url = f"{base_url.rstrip('/')}/rest/api/2/issue/{issue_key}/comment"
@@ -158,4 +188,6 @@ def publish_jira_comment(
         body_text=body,
         token=bearer_token,
         dry_run=dry_run,
+        max_retries=max_retries,
+        retry_delay_seconds=retry_delay_seconds,
     )
