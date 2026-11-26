@@ -23,6 +23,12 @@ class TicketSyncReport(BaseModel):
     comment_markdown: str
 
 
+def _escape_markdown_cell(value: str) -> str:
+    """Normalize line breaks and escape pipe characters for a Markdown table cell."""
+    normalized = value.replace("\r\n", " ").replace("\r", " ").replace("\n", " ")
+    return normalized.strip().replace("|", "\\|")
+
+
 def _format_ticket_comment(
     *,
     ticket_id: str,
@@ -32,9 +38,10 @@ def _format_ticket_comment(
 ) -> str:
     """Format a DriftReport as a concise Markdown comment for a ticket."""
     score = report.alignment_score
+    normalized_title = title.replace("\r\n", " ").replace("\r", " ").replace("\n", " ")
     lines = [
         f"## PMCursor Ticket Audit — `{provider}:{ticket_id}`",
-        f"**Title:** {title}",
+        f"**Title:** {normalized_title}",
         "",
         f"- **Status:** `{report.status}`",
         f"- **Alignment score:** **{score.overall_score}/100**",
@@ -58,10 +65,18 @@ def _format_ticket_comment(
             ]
         )
         for finding in report.findings:
-            cite = f"`{finding.code_citation}`" if finding.code_citation else "None"
+            severity = _escape_markdown_cell(finding.severity.upper())
+            category = _escape_markdown_cell(finding.category)
+            spec_ref = _escape_markdown_cell(finding.spec_reference)
+            cite = (
+                f"`{_escape_markdown_cell(finding.code_citation)}`"
+                if finding.code_citation
+                else "None"
+            )
+            message = _escape_markdown_cell(finding.message)
             lines.append(
-                f"| `{finding.severity.upper()}` | `{finding.category}` "
-                f"| `{finding.spec_reference}` | {cite} | {finding.message} |"
+                f"| `{severity}` | `{category}` "
+                f"| `{spec_ref}` | {cite} | {message} |"
             )
     return "\n".join(lines) + "\n"
 

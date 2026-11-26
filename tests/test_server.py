@@ -2,13 +2,16 @@ from __future__ import annotations
 
 import hashlib
 import hmac
+import importlib
 import json
 from pathlib import Path
+from typing import Any
 from urllib.parse import urlencode
 
+import pytest
 from fastapi.testclient import TestClient
 
-from api.server import _is_authorized, create_app
+from api.server import _is_authorized, app, create_app, run_server
 from pmcursor.models import DriftReport, PRImpactReport
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
@@ -487,3 +490,95 @@ def test_github_webhook_form_encoded_pr_impact_payload(tmp_path: Path) -> None:
     assert data["org_id"] == "acme"
     assert len(data["touched_contracts"]) == 1
     assert data["touched_contracts"][0]["name"] == "Order"
+
+
+def _patch_fake_uvicorn(monkeypatch: pytest.MonkeyPatch) -> list[tuple[tuple[Any, ...], dict[str, Any]]]:
+    calls: list[tuple[tuple[Any, ...], dict[str, Any]]] = []
+
+    class _FakeUvicorn:
+        def run(self, *args: Any, **kwargs: Any) -> None:
+            calls.append((args, kwargs))
+
+    def _fake_import_module(name: str, package: str | None = None) -> Any:
+        assert name == "uvicorn"
+        return _FakeUvicorn()
+
+    monkeypatch.setattr(importlib, "import_module", _fake_import_module)
+    return calls
+
+
+def test_run_server_non_loopback_without_token_raises(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.delenv("PMCURSOR_API_TOKEN", raising=False)
+    monkeypatch.delenv("WEB_CONCURRENCY", raising=False)
+    calls = _patch_fake_uvicorn(monkeypatch)
+
+    with pytest.raises(ValueError, match="PMCURSOR_API_TOKEN"):
+        run_server(host="0.0.0.0", port=8000)
+
+    assert calls == []
+
+
+def test_run_server_non_loopback_with_token_succeeds(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("PMCURSOR_API_TOKEN", "secret-token")
+    monkeypatch.delenv("WEB_CONCURRENCY", raising=False)
+    calls = _patch_fake_uvicorn(monkeypatch)
+
+    run_server(host="0.0.0.0", port=8000)
+
+    assert calls == [((app,), {"host": "0.0.0.0", "port": 8000})]
+
+
+def test_run_server_loopback_without_token_succeeds(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.delenv("PMCURSOR_API_TOKEN", raising=False)
+    monkeypatch.delenv("WEB_CONCURRENCY", raising=False)
+    calls = _patch_fake_uvicorn(monkeypatch)
+
+    run_server(host="127.0.0.1", port=8000)
+
+    assert calls == [((app,), {"host": "127.0.0.1", "port": 8000})]
+
+
+def test_run_server_web_concurrency_multi_worker(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.delenv("PMCURSOR_API_TOKEN", raising=False)
+    monkeypatch.setenv("WEB_CONCURRENCY", "2")
+    calls = _patch_fake_uvicorn(monkeypatch)
+
+    run_server(host="127.0.0.1", port=8000)
+
+    assert calls == [
+        (("api.server:app",), {"host": "127.0.0.1", "port": 8000, "workers": 2})
+    ]
+
+
+def test_run_server_invalid_web_concurrency_raises(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.delenv("PMCURSOR_API_TOKEN", raising=False)
+    monkeypatch.setenv("WEB_CONCURRENCY", "0")
+    _patch_fake_uvicorn(monkeypatch)
+
+    with pytest.raises(ValueError, match="WEB_CONCURRENCY"):
+        run_server(host="127.0.0.1", port=8000)
+
+
+def test_run_server_missing_uvicorn_raises_runtime_error(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.delenv("PMCURSOR_API_TOKEN", raising=False)
+    monkeypatch.delenv("WEB_CONCURRENCY", raising=False)
+
+    def _missing_import(name: str, package: str | None = None) -> Any:
+        raise ModuleNotFoundError("No module named 'uvicorn'")
+
+    monkeypatch.setattr(importlib, "import_module", _missing_import)
+
+    with pytest.raises(RuntimeError, match="pmcursor\\[server\\]"):
+        run_server(host="127.0.0.1", port=8000)

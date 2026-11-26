@@ -3,11 +3,10 @@ from __future__ import annotations
 import argparse
 import subprocess
 import sys
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from pathlib import Path
 
 from api import compute_pr_impact
-from api.server import run_server
 from pmcursor.drift import (
     check_spec_drift,
     fix_prd_markdown,
@@ -18,6 +17,12 @@ from pmcursor.indexer import index_repository
 from pmcursor.plugin_validator import validate_plugin_manifests
 from pmcursor.tickets import audit_ticket_against_repo
 from web.canvas import render_split_pane_canvas
+
+_run_server: Callable[..., None] | None
+try:
+    from api.server import run_server as _run_server
+except ModuleNotFoundError:
+    _run_server = None
 
 CLI_EPILOG = """Examples:
   python3 -m pmcursor.cli index --repo . --json
@@ -551,7 +556,18 @@ def main(argv: Sequence[str] | None = None) -> int:
         return 0
 
     if args.command == "serve":
-        run_server(host=args.host, port=args.port)
+        if _run_server is None:
+            print(
+                "Error: server dependencies are not installed. "
+                "Install with: pip install 'pmcursor[server]'",
+                file=sys.stderr,
+            )
+            return 2
+        try:
+            _run_server(host=args.host, port=args.port)
+        except (RuntimeError, ValueError) as exc:
+            print(f"Error: {exc}", file=sys.stderr)
+            return 2
         return 0
 
     return 2
