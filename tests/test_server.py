@@ -434,3 +434,56 @@ def test_drift_audit_ignores_out_of_workspace_symlinks(tmp_path: Path) -> None:
         f["category"] == "missing_model" and "SecretModel" in f["spec_reference"]
         for f in data["findings"]
     )
+
+
+def test_drift_audit_latin1_decoded_utf8_header(tmp_path: Path) -> None:
+    (tmp_path / "models.py").write_text(
+        "from pydantic import BaseModel\n\nclass Ping(BaseModel):\n    ok: bool\n",
+        encoding="utf-8",
+    )
+    token = "tökén-secret-🔑"
+    wire_latin1 = token.encode("utf-8").decode("latin-1")
+    assert _is_authorized(token, f"Bearer {wire_latin1}", "") is True
+    assert _is_authorized(token, "", wire_latin1) is True
+
+
+def test_github_webhook_form_encoded_pr_impact_payload(tmp_path: Path) -> None:
+    (tmp_path / "models.py").write_text(
+        "from pydantic import BaseModel\n\nclass Order(BaseModel):\n    order_id: str\n",
+        encoding="utf-8",
+    )
+    secret = "whsec_server_secret"
+    app = create_app(webhook_secret=secret, allowed_workspace_root=tmp_path)
+    client = TestClient(app)
+
+    payload_json = json.dumps(
+        {
+            "org_id": "acme",
+            "prd_markdown": "# Order PRD\n- `Order.order_id: str`\n",
+            "diff_text": (
+                "diff --git a/models.py b/models.py\n"
+                "--- a/models.py\n"
+                "+++ b/models.py\n"
+                "@@ -3,2 +3,2 @@ class Order(BaseModel):\n"
+                "     order_id: str\n"
+            ),
+            "prd_path": "PRD.md",
+            "repo_root": str(tmp_path),
+        }
+    )
+    body = urlencode({"payload": payload_json}).encode("utf-8")
+    sig = _sign_payload(body, secret)
+
+    response = client.post(
+        "/v1/webhooks/github",
+        content=body,
+        headers={
+            "X-Hub-Signature-256": sig,
+            "Content-Type": "application/x-www-form-urlencoded",
+        },
+    )
+    assert response.status_code == 200
+    data = response.json()
+    assert data["org_id"] == "acme"
+    assert len(data["touched_contracts"]) == 1
+    assert data["touched_contracts"][0]["name"] == "Order"
