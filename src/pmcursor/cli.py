@@ -11,7 +11,7 @@ from pathlib import Path
 from typing import Any
 
 from api import OrgDashboardSummary, compute_pr_impact
-from pmcursor._cli_parser import CLI_EPILOG, build_parser  # noqa: F401
+from pmcursor._cli_parser import CLI_EPILOG, build_parser
 from pmcursor.checklists import generate_edge_case_checklist
 from pmcursor.drift import (
     check_spec_drift,
@@ -41,6 +41,8 @@ from pmcursor.sarif import drift_report_to_sarif
 from pmcursor.telemetry_verify import verify_telemetry_samples
 from pmcursor.tickets import audit_ticket_against_repo
 from web.canvas import render_split_pane_canvas
+
+__all__ = ["CLI_EPILOG", "build_parser", "main"]
 
 _run_server: Callable[..., None] | None
 try:
