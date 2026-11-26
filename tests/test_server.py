@@ -4,10 +4,11 @@ import hashlib
 import hmac
 import json
 from pathlib import Path
+from urllib.parse import urlencode
 
 from fastapi.testclient import TestClient
 
-from api.server import create_app
+from api.server import _is_authorized, create_app
 from pmcursor.models import DriftReport, PRImpactReport
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
@@ -339,3 +340,97 @@ def test_github_action_exists_and_invokes_drift() -> None:
     run_script = "\n".join(run_lines)
     assert "${{ inputs." not in run_script
     assert "${{ github.action_path }}" not in run_script
+
+
+
+def test_drift_audit_lowercase_bearer_and_non_ascii_token(tmp_path: Path) -> None:
+    (tmp_path / "models.py").write_text(
+        "from pydantic import BaseModel\n\nclass Ping(BaseModel):\n    ok: bool\n",
+        encoding="utf-8",
+    )
+    app = create_app(
+        allowed_workspace_root=tmp_path,
+        api_token="ascii-secret-token",
+    )
+    client = TestClient(app)
+
+    res_bearer = client.post(
+        "/v1/drift/audit",
+        json={"prd_markdown": "# PRD\n", "repo_root": str(tmp_path)},
+        headers={"Authorization": "bearer  ascii-secret-token "},
+    )
+    assert res_bearer.status_code == 200
+
+    res_header = client.post(
+        "/v1/drift/audit",
+        json={"prd_markdown": "# PRD\n", "repo_root": str(tmp_path)},
+        headers={"X-PMCursor-Token": "ascii-secret-token"},
+    )
+    assert res_header.status_code == 200
+
+    assert _is_authorized("tökén-secret-🔑", "bearer  tökén-secret-🔑 ", "") is True
+    assert _is_authorized("tökén-secret-🔑", "", "tökén-secret-🔑") is True
+    assert _is_authorized("tökén-secret-🔑", "", "wrong") is False
+
+
+def test_github_webhook_form_encoded_pull_request(tmp_path: Path) -> None:
+    secret = "whsec_server_secret"
+    app = create_app(webhook_secret=secret, allowed_workspace_root=tmp_path)
+    client = TestClient(app)
+
+    payload_json = json.dumps(
+        {
+            "action": "synchronize",
+            "number": 7,
+            "pull_request": {"number": 7, "title": "Update contract"},
+            "repository": {"full_name": "creova-gif/pmcursor"},
+        }
+    )
+    body = urlencode({"payload": payload_json}).encode("utf-8")
+    sig = _sign_payload(body, secret)
+
+    response = client.post(
+        "/v1/webhooks/github",
+        content=body,
+        headers={
+            "X-Hub-Signature-256": sig,
+            "Content-Type": "application/x-www-form-urlencoded",
+        },
+    )
+    assert response.status_code == 200
+    data = response.json()
+    assert data["status"] == "accepted"
+    assert data["pr_number"] == 7
+
+
+def test_drift_audit_ignores_out_of_workspace_symlinks(tmp_path: Path) -> None:
+    outside_dir = tmp_path / "outside"
+    workspace = tmp_path / "workspace"
+    outside_dir.mkdir()
+    workspace.mkdir()
+    secret_py = outside_dir / "secret.py"
+    secret_py.write_text(
+        "from pydantic import BaseModel\n\nclass SecretModel(BaseModel):\n    key: str\n",
+        encoding="utf-8",
+    )
+    (workspace / "leak.py").symlink_to(secret_py)
+    (workspace / "local.py").write_text(
+        "from pydantic import BaseModel\n\nclass LocalModel(BaseModel):\n    id: str\n",
+        encoding="utf-8",
+    )
+
+    app = create_app(allowed_workspace_root=workspace)
+    client = TestClient(app)
+    res = client.post(
+        "/v1/drift/audit",
+        json={
+            "prd_markdown": "# PRD\n- `SecretModel.key: str`\n- `LocalModel.id: str`\n",
+            "repo_root": str(workspace),
+        },
+    )
+    assert res.status_code == 200
+    data = res.json()
+    assert any(
+        f["category"] == "missing_model" and "SecretModel" in f["spec_reference"]
+        for f in data["findings"]
+    )

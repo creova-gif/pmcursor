@@ -1021,7 +1021,12 @@ def index_repository(repo_root: Path) -> RepoMap:
     indexed_files: list[str] = []
 
     for path in sorted(resolved_root.rglob("*")):
-        if not path.is_file():
+        if path.is_symlink() or not path.is_file():
+            continue
+        try:
+            if not path.resolve().is_relative_to(resolved_root):
+                continue
+        except OSError:
             continue
         rel_parts = path.relative_to(resolved_root).parts
         if any(part in IGNORED_DIRS or part.startswith(".") for part in rel_parts[:-1]):

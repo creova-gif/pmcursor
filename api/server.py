@@ -5,6 +5,7 @@ import json
 import os
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
+from urllib.parse import parse_qs
 
 from fastapi import FastAPI, Header, HTTPException
 from pydantic import ValidationError
@@ -31,13 +32,32 @@ def _is_authorized(
     authorization: str,
     x_pmcursor_token: str,
 ) -> bool:
-    bearer_token = authorization[7:] if authorization.startswith("Bearer ") else ""
-    return (
-        bool(bearer_token) and hmac.compare_digest(bearer_token, expected_token)
-    ) or (
-        bool(x_pmcursor_token)
-        and hmac.compare_digest(x_pmcursor_token, expected_token)
+    expected_bytes = expected_token.encode("utf-8")
+    parts = authorization.strip().split(None, 1)
+    bearer_token = (
+        parts[1].strip()
+        if len(parts) == 2 and parts[0].lower() == "bearer"
+        else ""
     )
+    header_token = x_pmcursor_token.strip()
+    return (
+        bool(bearer_token)
+        and hmac.compare_digest(bearer_token.encode("utf-8"), expected_bytes)
+    ) or (
+        bool(header_token)
+        and hmac.compare_digest(header_token.encode("utf-8"), expected_bytes)
+    )
+
+
+def _decode_webhook_json(payload_body: bytes, content_type: str) -> Any:
+    text = payload_body.decode("utf-8")
+    if "application/x-www-form-urlencoded" in content_type.lower():
+        form = parse_qs(text, keep_blank_values=True)
+        raw_payloads = form.get("payload")
+        if not raw_payloads or not raw_payloads[0]:
+            raise ValueError("Missing 'payload' field in form-encoded webhook")
+        return json.loads(raw_payloads[0])
+    return json.loads(text)
 
 
 def create_app(
@@ -97,8 +117,9 @@ def create_app(
                 status_code=401, detail="Invalid GitHub webhook signature"
             )
         try:
-            data = json.loads(payload_body.decode("utf-8"))
-        except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+            content_type = request.headers.get("content-type", "")
+            data = _decode_webhook_json(payload_body, content_type)
+        except (UnicodeDecodeError, json.JSONDecodeError, ValueError) as exc:
             raise HTTPException(status_code=422, detail=str(exc)) from exc
         if isinstance(data, dict):
             if "zen" in data:
