@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import os
 import sys
+import threading
 from collections import OrderedDict
 from pathlib import Path
 from typing import Any, TextIO
@@ -264,6 +265,7 @@ class RepoIndexCache:
         self._entries: OrderedDict[Path, tuple[RepoFingerprint, RepoMap]] = OrderedDict()
         self._hits = 0
         self._misses = 0
+        self._lock = threading.RLock()
 
     @property
     def max_entries(self) -> int:
@@ -273,21 +275,25 @@ class RepoIndexCache:
     @property
     def size(self) -> int:
         """Return the number of cached repository entries."""
-        return len(self._entries)
+        with self._lock:
+            return len(self._entries)
 
     @property
     def hits(self) -> int:
         """Return the number of cache hits."""
-        return self._hits
+        with self._lock:
+            return self._hits
 
     @property
     def misses(self) -> int:
         """Return the number of cache misses."""
-        return self._misses
+        with self._lock:
+            return self._misses
 
     def clear(self) -> None:
         """Remove all cached repository entries."""
-        self._entries.clear()
+        with self._lock:
+            self._entries.clear()
 
     @staticmethod
     def _compute_fingerprint(repo_root: Path) -> RepoFingerprint:
@@ -314,20 +320,21 @@ class RepoIndexCache:
     def get_or_index(self, repo_root: Path) -> RepoMap:
         """Return a cached RepoMap when the repo fingerprint matches, else re-index."""
         resolved_root = repo_root.resolve()
-        fingerprint = self._compute_fingerprint(resolved_root)
-        cached = self._entries.get(resolved_root)
-        if cached is not None and cached[0] == fingerprint:
-            self._entries.move_to_end(resolved_root)
-            self._hits += 1
-            return cached[1]
+        with self._lock:
+            fingerprint = self._compute_fingerprint(resolved_root)
+            cached = self._entries.get(resolved_root)
+            if cached is not None and cached[0] == fingerprint:
+                self._entries.move_to_end(resolved_root)
+                self._hits += 1
+                return cached[1]
 
-        self._misses += 1
-        repo_map = index_repository(resolved_root)
-        self._entries[resolved_root] = (fingerprint, repo_map)
-        self._entries.move_to_end(resolved_root)
-        while len(self._entries) > self.max_entries:
-            self._entries.popitem(last=False)
-        return repo_map
+            self._misses += 1
+            repo_map = index_repository(resolved_root)
+            self._entries[resolved_root] = (fingerprint, repo_map)
+            self._entries.move_to_end(resolved_root)
+            while len(self._entries) > self.max_entries:
+                self._entries.popitem(last=False)
+            return repo_map
 
 
 class PMCursorMCPServer:

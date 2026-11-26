@@ -31,6 +31,10 @@ All notable changes to PMCursor are documented in this file.
 
 ### Security
 
+- Added `_SlidingWindowRateLimiter` (`PMCURSOR_RATE_LIMIT_PER_MIN`) in `api/server.py` returning HTTP `429` with `Retry-After` when exceeded (`/health` and `/readyz` probes exempt).
+- Added `_DeliveryDeduplicator` in `api/server.py` to deduplicate replayed webhooks via `X-GitHub-Delivery` and `Linear-Delivery` headers.
+- Added security response headers (`X-Content-Type-Options: nosniff`, `X-Frame-Options: DENY`, `Referrer-Policy: no-referrer`) in `api/server.py`.
+- Added `threading.RLock` locking to `RepoIndexCache` in `src/pmcursor/mcp_server.py` for thread-safe concurrent access.
 - Added a `2MB` webhook payload cap returning HTTP `413` on oversized webhook requests in `api/server.py`.
 - Added a server bind guard requiring `PMCURSOR_API_TOKEN` when binding to non-loopback hosts, `WEB_CONCURRENCY` worker configuration, graceful CLI handling when `pmcursor[server]` extras are not installed, and Markdown table cell escaping.
 

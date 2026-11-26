@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import concurrent.futures
 import io
 import json
 import os
@@ -446,3 +447,19 @@ def test_mcp_server_flags_and_telemetry_verify_tools(tmp_path: Path) -> None:
     assert telemetry_payload["matched_events"] == 1
     assert telemetry_payload["total_code_events"] == 1
     assert telemetry_payload["items"][0]["status"] == "matched"
+
+
+def test_repo_index_cache_thread_safety(tmp_path: Path) -> None:
+    repos = [_build_sample_repo(tmp_path / f"ws_{idx}") for idx in range(4)]
+    cache = RepoIndexCache(max_entries=2)
+    targets = [repos[i % len(repos)] for i in range(64)]
+    total_calls = len(targets)
+
+    with concurrent.futures.ThreadPoolExecutor(max_workers=8) as executor:
+        futures = [executor.submit(cache.get_or_index, repo) for repo in targets]
+        results = [future.result() for future in futures]
+
+    assert len(results) == total_calls
+    assert all(isinstance(repo_map, RepoMap) for repo_map in results)
+    assert cache.hits + cache.misses == total_calls
+    assert cache.size <= 2

@@ -28,6 +28,7 @@ docker run -d \
 | Environment Variable | Description | Default |
 | --- | --- | --- |
 | `PMCURSOR_API_TOKEN` | Bearer / `X-PMCursor-Token` secret required by authenticated `/v1/*` endpoints. | Unset |
+| `PMCURSOR_RATE_LIMIT_PER_MIN` | Per-client request rate limit per minute. Exceeding the limit returns HTTP `429 Too Many Requests` with a `Retry-After` header (`/health` and `/readyz` probes are exempt). | Unset |
 | `WEB_CONCURRENCY` | Positive integer number of `uvicorn` worker processes. | `1` |
 | `PYTHONPATH` | Configured in the image as `/app/src:/app`. | `/app/src:/app` |
 
@@ -96,6 +97,7 @@ All webhook endpoints (`/v1/webhooks/github`, `/v1/webhooks/linear`, `/v1/webhoo
 
 ### Additional Hardening
 
+- Configure `PMCURSOR_RATE_LIMIT_PER_MIN` to enforce per-client rate limiting (returning `429 Too Many Requests` with `Retry-After`; `/health` and `/readyz` probes are exempt).
 - Run as the non-root `pmcursor` user (configured in `Dockerfile`).
 - Terminate TLS at your ingress or load balancer; do not expose plaintext HTTP to the public internet.
 - Mount only the workspace directories you intend to audit, and avoid storing secrets in repository files.

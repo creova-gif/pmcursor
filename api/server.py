@@ -5,8 +5,10 @@ import importlib
 import json
 import logging
 import os
+import threading
 import time
 import uuid
+from collections import OrderedDict, deque
 from collections.abc import Awaitable, Callable
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
@@ -176,6 +178,76 @@ def _parse_webhook_dict_and_repo(
     return data, root
 
 
+class _SlidingWindowRateLimiter:
+    """Thread-safe per-client sliding-window rate limiter."""
+
+    def __init__(self, max_requests: int, window_seconds: float = 60.0) -> None:
+        if max_requests <= 0:
+            raise ValueError("max_requests must be a positive integer")
+        if window_seconds <= 0:
+            raise ValueError("window_seconds must be positive")
+        self._max_requests = max_requests
+        self._window_seconds = window_seconds
+        self._lock = threading.Lock()
+        self._requests: dict[str, deque[float]] = {}
+
+    def allow(self, client_key: str) -> bool:
+        """Return True if the request is within the rate limit, False otherwise."""
+        now = time.monotonic()
+        cutoff = now - self._window_seconds
+        with self._lock:
+            timestamps = self._requests.get(client_key)
+            if timestamps is None:
+                timestamps = deque()
+                self._requests[client_key] = timestamps
+            while timestamps and timestamps[0] <= cutoff:
+                timestamps.popleft()
+            if len(timestamps) >= self._max_requests:
+                return False
+            timestamps.append(now)
+            return True
+
+
+class _DeliveryDeduplicator:
+    """Thread-safe bounded FIFO/LRU webhook delivery ID deduplicator."""
+
+    def __init__(self, max_entries: int = 1024) -> None:
+        if max_entries <= 0:
+            raise ValueError("max_entries must be a positive integer")
+        self._max_entries = max_entries
+        self._lock = threading.Lock()
+        self._seen: OrderedDict[str, None] = OrderedDict()
+
+    def mark_if_new(self, delivery_id: str) -> bool:
+        """Record delivery_id if unseen; return True if new, False if duplicate."""
+        with self._lock:
+            if delivery_id in self._seen:
+                self._seen.move_to_end(delivery_id)
+                return False
+            self._seen[delivery_id] = None
+            if len(self._seen) > self._max_entries:
+                self._seen.popitem(last=False)
+            return True
+
+
+def _resolve_rate_limit(rate_limit_per_minute: int | None) -> int | None:
+    """Resolve effective per-minute rate limit from argument or environment."""
+    if rate_limit_per_minute is not None:
+        if rate_limit_per_minute <= 0:
+            raise ValueError("rate_limit_per_minute must be a positive integer")
+        return rate_limit_per_minute
+    raw_env = os.environ.get("PMCURSOR_RATE_LIMIT_PER_MIN", "").strip()
+    if not raw_env:
+        return None
+    try:
+        parsed = int(raw_env)
+    except ValueError:
+        return None
+    if parsed <= 0:
+        return None
+    return parsed
+
+
 def create_app(
     *,
     webhook_secret: str | None = None,
@@ -184,10 +256,18 @@ def create_app(
     allowed_workspace_root: Path | None = None,
     api_token: str | None = None,
     repo_cache: RepoIndexCache | None = None,
+    rate_limit_per_minute: int | None = None,
 ) -> FastAPI:
     """Create and configure the PMCursor FastAPI application."""
     fastapi_app = FastAPI(title="PMCursor API")
     cache = repo_cache if repo_cache is not None else RepoIndexCache()
+    effective_rate_limit = _resolve_rate_limit(rate_limit_per_minute)
+    rate_limiter = (
+        _SlidingWindowRateLimiter(effective_rate_limit)
+        if effective_rate_limit is not None
+        else None
+    )
+    delivery_deduplicator = _DeliveryDeduplicator()
     total_requests = 0
     error_requests = 0
 
@@ -201,30 +281,44 @@ def create_app(
         request_id = incoming_id or str(uuid.uuid4())
         start = time.perf_counter()
 
-        payload_too_large = False
-        raw_content_length = request.headers.get("content-length")
-        if raw_content_length is not None:
-            try:
-                content_length = int(raw_content_length)
-            except ValueError:
-                content_length = None
-            if content_length is not None and (
-                content_length < 0 or content_length > MAX_REQUEST_BYTES
-            ):
-                payload_too_large = True
+        is_probe = request.method == "GET" and request.url.path in {"/health", "/readyz"}
+        rate_limited = False
+        if rate_limiter is not None and not is_probe:
+            client_ip = request.client.host if request.client is not None else "unknown"
+            if not rate_limiter.allow(client_ip):
+                rate_limited = True
 
-        if not payload_too_large:
-            body = await request.body()
-            if len(body) > MAX_REQUEST_BYTES:
-                payload_too_large = True
-
-        if payload_too_large:
+        if rate_limited:
             response: Response = JSONResponse(
-                status_code=413,
-                content={"detail": "Request payload exceeds 2MB limit"},
+                status_code=429,
+                content={"detail": "Rate limit exceeded"},
+                headers={"Retry-After": "60"},
             )
         else:
-            response = await call_next(request)
+            payload_too_large = False
+            raw_content_length = request.headers.get("content-length")
+            if raw_content_length is not None:
+                try:
+                    content_length = int(raw_content_length)
+                except ValueError:
+                    content_length = None
+                if content_length is not None and (
+                    content_length < 0 or content_length > MAX_REQUEST_BYTES
+                ):
+                    payload_too_large = True
+
+            if not payload_too_large:
+                body = await request.body()
+                if len(body) > MAX_REQUEST_BYTES:
+                    payload_too_large = True
+
+            if payload_too_large:
+                response = JSONResponse(
+                    status_code=413,
+                    content={"detail": "Request payload exceeds 2MB limit"},
+                )
+            else:
+                response = await call_next(request)
 
         total_requests += 1
         if response.status_code >= 400:
@@ -232,6 +326,9 @@ def create_app(
         duration_ms = round((time.perf_counter() - start) * 1000.0, 2)
         response.headers["X-Request-ID"] = request_id
         response.headers["X-Process-Time-Ms"] = f"{duration_ms:.2f}"
+        response.headers["X-Content-Type-Options"] = "nosniff"
+        response.headers["X-Frame-Options"] = "DENY"
+        response.headers["Referrer-Policy"] = "no-referrer"
         logger.info(
             json.dumps(
                 {
@@ -431,6 +528,7 @@ def create_app(
     async def github_webhook(
         request: WebhookRequest,
         x_hub_signature_256: str = Header(default="", alias="X-Hub-Signature-256"),
+        x_github_delivery: str = Header(default="", alias="X-GitHub-Delivery"),
     ) -> PRImpactReport | dict[str, Any]:
         payload_body = await _read_bounded_webhook_body(request)
         secret = (
@@ -442,6 +540,9 @@ def create_app(
             raise HTTPException(
                 status_code=401, detail="Invalid GitHub webhook signature"
             )
+        delivery_id = x_github_delivery.strip()
+        if delivery_id and not delivery_deduplicator.mark_if_new(f"github:{delivery_id}"):
+            return {"status": "duplicate", "delivery_id": delivery_id}
         try:
             content_type = request.headers.get("content-type", "")
             data = _decode_webhook_json(payload_body, content_type)
@@ -484,6 +585,7 @@ def create_app(
     async def linear_webhook(
         request: WebhookRequest,
         linear_signature: str = Header(default="", alias="Linear-Signature"),
+        linear_delivery: str = Header(default="", alias="Linear-Delivery"),
     ) -> TicketSyncReport | dict[str, Any]:
         payload_body = await _read_bounded_webhook_body(request)
         secret = (
@@ -495,6 +597,9 @@ def create_app(
             raise HTTPException(
                 status_code=401, detail="Invalid Linear webhook signature"
             )
+        delivery_id = linear_delivery.strip()
+        if delivery_id and not delivery_deduplicator.mark_if_new(f"linear:{delivery_id}"):
+            return {"status": "duplicate", "delivery_id": delivery_id}
         data, root = _parse_webhook_dict_and_repo(
             payload_body,
             request.headers.get("content-type", ""),
