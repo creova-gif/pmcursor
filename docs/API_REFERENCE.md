@@ -58,6 +58,7 @@ All HTTP responses include the following headers from `request_context_middlewar
 | `POST` | `/v1/release-notes` | Token | Synthesize diff-grounded release notes and PRD scope coverage | `ReleaseNotesReport` (JSON) |
 | `POST` | `/v1/flags/audit` | Token | Audit PRD feature-flag declarations and rollout/rollback readiness | `FlagAuditReport` (JSON) |
 | `POST` | `/v1/telemetry/verify` | Token | Verify observed runtime telemetry samples against indexed contracts (body: `events` XOR `source` + `limit`) | `TelemetryVerificationReport` (JSON) |
+| `POST` | `/v1/index` | Token | Index a repository into a `RepoMap` (models, routes, telemetry, ADRs, indexed files) | `RepoMap` (JSON) |
 | `GET` | `/v1/github-app/manifest` | Token | Build a GitHub App creation manifest (`webhook_url` required) | manifest JSON |
 | `POST` | `/v1/github-app/manifest/conversions` | Token | Exchange an app-manifest `code` for app credentials | `GitHubAppCredentials` (JSON, sensitive) |
 | `POST` | `/v1/github-app/installations/{installation_id}/token` | Token | Mint an installation access token (requires `pmcursor[github-app]` + app env config) | `GitHubInstallationToken` (JSON) |

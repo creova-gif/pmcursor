@@ -28,6 +28,10 @@ class DriftAuditRequest(BaseModel):
     prd_path: str = "PRD.md"
 
 
+class IndexRequest(BaseModel):
+    repo_root: str = "."
+
+
 class SummarizeRequest(BaseModel):
     prd_markdown: str
     repo_root: str = "."

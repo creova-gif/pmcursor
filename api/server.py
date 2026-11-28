@@ -26,6 +26,7 @@ from api import (
     FlagAuditRequest,
     GitHubManifestConversionRequest,
     GitHubWebhookPayload,
+    IndexRequest,
     OrgDashboardSummary,
     PublishCommentRequest,
     ReleaseNotesRequest,
@@ -62,7 +63,7 @@ from pmcursor.llm import (
     summarize_drift_report,
 )
 from pmcursor.mcp_server import RepoIndexCache
-from pmcursor.models import DriftReport, PRImpactReport
+from pmcursor.models import DriftReport, PRImpactReport, RepoMap
 from pmcursor.publisher import (
     PublishResult,
     publish_github_pr_comment,
@@ -576,6 +577,16 @@ def create_app(
         cleared = cache.size
         cache.clear()
         return {"status": "cleared", "cleared_entries": cleared}
+
+    @fastapi_app.post("/v1/index", response_model=RepoMap)
+    def index_endpoint(
+        body: IndexRequest,
+        authorization: str = Header(default="", alias="Authorization"),
+        x_pmcursor_token: str = Header(default="", alias="X-PMCursor-Token"),
+    ) -> RepoMap:
+        _require_auth(api_token, authorization, x_pmcursor_token)
+        repo_path = _resolve_allowed_repo_root(body.repo_root, allowed_workspace_root)
+        return cache.get_or_index(repo_path)
 
     @fastapi_app.post("/v1/drift/audit")
     def drift_audit(
