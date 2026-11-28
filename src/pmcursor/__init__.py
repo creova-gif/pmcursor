@@ -90,6 +90,13 @@ from pmcursor.telemetry_verify import (
     TelemetryVerificationReport,
     verify_telemetry_samples,
 )
+from pmcursor.tenancy import (
+    Org,
+    OrgApiKey,
+    OrgRegistry,
+    OrgRegistryError,
+    default_org_registry,
+)
 from pmcursor.tickets import (
     TicketProvider,
     TicketSyncReport,
@@ -122,6 +129,10 @@ __all__ = [
     "LangfuseConnector",
     "ModelContract",
     "ObservedTelemetryEvent",
+    "Org",
+    "OrgApiKey",
+    "OrgRegistry",
+    "OrgRegistryError",
     "PMCursorMCPServer",
     "PMDriftSummary",
     "PRImpactItem",
@@ -150,6 +161,7 @@ __all__ = [
     "compute_scope_coverage",
     "default_github_app",
     "default_llm_client",
+    "default_org_registry",
     "drift_report_to_sarif",
     "exchange_manifest_code",
     "extract_feature_flags",

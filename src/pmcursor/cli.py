@@ -50,6 +50,12 @@ from pmcursor.telemetry_connectors import (
     fetch_telemetry_events,
 )
 from pmcursor.telemetry_verify import verify_telemetry_samples
+from pmcursor.tenancy import (
+    DEFAULT_STORE_PATH,
+    ENV_ORG_STORE,
+    OrgRegistry,
+    OrgRegistryError,
+)
 from pmcursor.tickets import audit_ticket_against_repo
 from web.canvas import render_split_pane_canvas
 
@@ -889,6 +895,97 @@ def main(argv: Sequence[str] | None = None) -> int:
             print(pm_summary.narrative_markdown, end="")
             print()
         return 0
+
+    if args.command == "orgs":
+        store_path = (
+            args.store
+            if args.store is not None
+            else Path(os.environ.get(ENV_ORG_STORE, "") or DEFAULT_STORE_PATH)
+        )
+        try:
+            registry = OrgRegistry(store_path)
+            if args.action == "create":
+                if not args.name.strip():
+                    print(
+                        "Error: --name is required for the create action.\n"
+                        "  Try: python3 -m pmcursor.cli orgs create --name Acme",
+                        file=sys.stderr,
+                    )
+                    return 2
+                org, api_key = registry.create_org(
+                    args.name, org_id=args.org_id or None
+                )
+                if args.json:
+                    print(
+                        json.dumps(
+                            {
+                                "org": org.model_dump(mode="json"),
+                                "api_key": api_key,
+                            },
+                            indent=2,
+                        )
+                    )
+                else:
+                    print(f"Created org {org.org_id} ({org.name})")
+                    print(f"API key (shown once): {api_key}")
+                return 0
+            if args.action == "list":
+                orgs = registry.list_orgs()
+                if args.json:
+                    print(
+                        json.dumps(
+                            {
+                                "orgs": [
+                                    o.model_dump(mode="json") for o in orgs
+                                ]
+                            },
+                            indent=2,
+                        )
+                    )
+                else:
+                    for o in orgs:
+                        active = sum(1 for k in o.keys if not k.revoked)
+                        print(f"{o.org_id}\t{o.name}\t{active} active key(s)")
+                    if not orgs:
+                        print("(no organizations)")
+                return 0
+            if args.action == "issue-key":
+                if not args.org_id:
+                    print(
+                        "Error: --org-id is required for the issue-key action.",
+                        file=sys.stderr,
+                    )
+                    return 2
+                api_key = registry.issue_key(args.org_id, label=args.label)
+                if args.json:
+                    print(
+                        json.dumps(
+                            {"org_id": args.org_id, "api_key": api_key},
+                            indent=2,
+                        )
+                    )
+                else:
+                    print(f"API key for {args.org_id} (shown once): {api_key}")
+                return 0
+            if args.action == "revoke-key":
+                if not args.key_id:
+                    print(
+                        "Error: --key-id is required for the revoke-key action.",
+                        file=sys.stderr,
+                    )
+                    return 2
+                if not registry.revoke_key(args.key_id):
+                    print(
+                        f"Error: key id {args.key_id!r} not found.",
+                        file=sys.stderr,
+                    )
+                    return 2
+                print(f"Revoked key {args.key_id}")
+                return 0
+        except OrgRegistryError as exc:
+            print(f"Error: {exc}", file=sys.stderr)
+            return 2
+        return 2
 
     return 2
 

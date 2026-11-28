@@ -157,6 +157,7 @@ docker compose up --build
 ### Configuration
 
 - `PMCURSOR_API_TOKEN`: Bearer token for API authentication. Required when binding `serve` to a non-loopback host (anything other than `127.0.0.1`, `localhost`, or `::1`).
+- `PMCURSOR_ORG_STORE`: Path to the multi-tenant org registry JSON (default `.pmcursor/orgs.json` for the `pmcursor orgs` CLI). When set on the server, per-org API keys (`pmk_...`) authenticate alongside `PMCURSOR_API_TOKEN` and bind an `org_id` to the request.
 - `PMCURSOR_WEBHOOK_SECRET`: HMAC secret used to verify incoming GitHub webhook signatures.
 - `PMCURSOR_LINEAR_WEBHOOK_SECRET`: HMAC-SHA256 secret used to verify incoming Linear webhook signatures (`Linear-Signature`).
 - `PMCURSOR_JIRA_WEBHOOK_SECRET`: HMAC-SHA256 secret used to verify incoming Jira webhook signatures (`X-Hub-Signature`); falls back to Bearer `PMCURSOR_API_TOKEN` when unset.
@@ -169,6 +170,7 @@ docker compose up --build
 
 - `GET /health`
 - `GET /readyz` (readiness probe with cached repo count)
+- `GET /v1/whoami` (resolve the presented credential — admin token, org key + `org_id`, or open)
 - `GET /metrics` (Prometheus-format request and repo cache metrics)
 - `POST /v1/cache/clear` (clear cached repository indexes)
 - `POST /v1/drift/audit`
