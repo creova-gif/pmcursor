@@ -12,6 +12,7 @@ dependencies = ["pydantic>=2.9"]
 [project.optional-dependencies]
 server = ["fastapi>=0.115", "uvicorn>=0.30"]
 llm = ["anthropic>=2.0"]
+bigquery = ["google-cloud-bigquery>=3.25"]
 
 [project.scripts]
 pmcursor = "pmcursor.cli:main"
@@ -36,6 +37,12 @@ python_version = "3.11"
 # `anthropic` is an optional extra ([project.optional-dependencies] llm); the
 # SDK ships py.typed but is not installed in base/CI environments.
 module = "anthropic"
+ignore_missing_imports = true
+
+[[tool.mypy.overrides]]
+# `google-cloud-bigquery` is an optional extra ([project.optional-dependencies]
+# bigquery); not installed in base/CI environments.
+module = ["google", "google.cloud", "google.cloud.*"]
 ignore_missing_imports = true
 
 [tool.ruff]

@@ -23,7 +23,8 @@ This roadmap tracks completed engineering milestones and upcoming platform capab
 | `M15` | Feature Flag & Rollout Contract Verification | Added `src/pmcursor/feature_flags.py` (`extract_feature_flags`, `audit_feature_flags_and_rollout`, `FlagAuditReport`), `pmcursor flags`, and `POST /v1/flags/audit` to index LaunchDarkly/Statsig/Unleash/generic flags and verify PRD rollout and rollback readiness. |
 | `M16` | Bi-Directional Comment Publisher & Org Alignment Dashboard | Added `src/pmcursor/publisher.py` (`publish_github_pr_comment`, `publish_linear_comment`, `publish_jira_comment`, `PublishResult`), `pmcursor dashboard`, and `GET /v1/dashboard` (`OrgDashboardSummary`) for bi-directional comment publishing and org-wide spec/rollout alignment reporting. |
 | `M17` | Claude-Powered PM Drift Summaries | Added `src/pmcursor/llm.py` (`PMDriftSummary`, `summarize_drift_report`, `LLMClient` protocol, `AnthropicLLMClient`) behind a `pmcursor[llm]` extra, `pmcursor summarize` (with `--offline`/`--json`), and `POST /v1/summarize`. Ship recommendation and risk lists stay deterministic; Claude writes only the narrative. |
+| `M18` | Live Telemetry Source Connectors | Added `src/pmcursor/telemetry_connectors.py` (`TelemetryConnector` protocol, `LangfuseConnector`, `BigQueryConnector`, `fetch_telemetry_events`, `ConnectorFetchError`, `TelemetryConnectorResult`) behind a `pmcursor[bigquery]` extra, `telemetry-verify --source langfuse|bigquery --limit`, and `source`/`limit` fields on `POST /v1/telemetry/verify`. |
 
 ## Upcoming Milestones
 
-Completed `M1`–`M17`. In flight: live telemetry connectors (BigQuery/Langfuse), an installable GitHub App, and a Next.js split-pane UI.
+Completed `M1`–`M18`. In flight: an installable GitHub App and a Next.js split-pane UI.

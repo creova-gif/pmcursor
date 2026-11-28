@@ -100,6 +100,11 @@ PMCursor adapts plugin packaging and CLI conventions from [`cursor/plugins`](htt
 	```bash
 	PYTHONPATH=src python3 -m pmcursor.cli telemetry-verify --repo . --events-file events.json
 	```
+	Or fetch live samples from a telemetry source instead of a file. Langfuse uses `LANGFUSE_HOST`/`LANGFUSE_PUBLIC_KEY`/`LANGFUSE_SECRET_KEY`; BigQuery uses `PMCURSOR_BQ_PROJECT`/`PMCURSOR_BQ_DATASET`/`PMCURSOR_BQ_TABLE` and requires `pmcursor[bigquery]` plus Application Default Credentials:
+	```bash
+	PYTHONPATH=src python3 -m pmcursor.cli telemetry-verify --repo . --source langfuse --limit 200
+	PYTHONPATH=src python3 -m pmcursor.cli telemetry-verify --repo . --source bigquery
+	```
 16. Compute an organization alignment summary across contracts, feature flags, drift, scope coverage, and edge-case checklists.
 	```bash
 	PYTHONPATH=src python3 -m pmcursor.cli dashboard --repo . --prd PROJECT_SPEC.md

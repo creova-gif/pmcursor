@@ -67,6 +67,14 @@ from pmcursor.release_notes import (
     generate_release_notes_and_coverage,
 )
 from pmcursor.sarif import drift_report_to_sarif
+from pmcursor.telemetry_connectors import (
+    BigQueryConnector,
+    ConnectorFetchError,
+    LangfuseConnector,
+    TelemetryConnector,
+    TelemetryConnectorResult,
+    fetch_telemetry_events,
+)
 from pmcursor.telemetry_verify import (
     ObservedTelemetryEvent,
     TelemetryDriftItem,
@@ -82,6 +90,8 @@ from pmcursor.tickets import (
 __all__ = [
     "ADRContract",
     "AnthropicLLMClient",
+    "BigQueryConnector",
+    "ConnectorFetchError",
     "DriftFinding",
     "DriftReport",
     "EdgeCaseCategory",
@@ -96,6 +106,7 @@ __all__ = [
     "FlagAuditReport",
     "LLMClient",
     "LLMUnavailableError",
+    "LangfuseConnector",
     "ModelContract",
     "ObservedTelemetryEvent",
     "PMCursorMCPServer",
@@ -111,6 +122,8 @@ __all__ = [
     "RouteContract",
     "ScopeCoverageReport",
     "SpecAlignmentScore",
+    "TelemetryConnector",
+    "TelemetryConnectorResult",
     "TelemetryContract",
     "TelemetryDriftItem",
     "TelemetrySourceKind",
@@ -124,6 +137,7 @@ __all__ = [
     "default_llm_client",
     "drift_report_to_sarif",
     "extract_feature_flags",
+    "fetch_telemetry_events",
     "fix_prd_markdown",
     "format_drift_report_markdown",
     "generate_edge_case_checklist",
