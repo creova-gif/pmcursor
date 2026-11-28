@@ -11,6 +11,8 @@ When `PMCURSOR_API_TOKEN` is configured, protected `/v1/*` endpoints require a v
 - `Authorization: Bearer <PMCURSOR_API_TOKEN>`
 - `X-PMCursor-Token: <PMCURSOR_API_TOKEN>`
 
+When `PMCURSOR_ORG_STORE` is configured (or `create_app(org_registry=...)`), per-organization API keys (`pmk_...`, issued via `pmcursor orgs`) authenticate the same way — either header — and bind the resolved `org_id` to the request. `GET /v1/whoami` reports which credential resolved (`admin`, `org-key`, or `open`). Org keys are stored as SHA-256 hashes; `pmcursor orgs` prints the plaintext once at issue time.
+
 ### Webhook HMAC Signatures
 
 Incoming webhook endpoints verify request bodies using HMAC-SHA256 signatures and deduplicate replayed deliveries:
@@ -49,6 +51,7 @@ All HTTP responses include the following headers from `request_context_middlewar
 |:---|:---|:---|:---|:---|
 | `GET` | `/health` | None | Liveness probe (`{"status": "ok"}`) | `application/json` |
 | `GET` | `/readyz` | None | Readiness probe reporting `cached_repos` count | `application/json` |
+| `GET` | `/v1/whoami` | Token | Resolve the presented credential (`admin`, `org-key` + `org_id`, or `open` when no auth is configured) | `application/json` |
 | `GET` | `/metrics` | None | Prometheus counters/gauges (`pmcursor_http_requests_total`, `pmcursor_http_errors_total`, `pmcursor_rate_limited_total`, `pmcursor_webhook_duplicates_total`, `pmcursor_repo_cache_entries`, `pmcursor_repo_cache_hits_total`, `pmcursor_repo_cache_misses_total`) | `text/plain; version=0.0.4` |
 | `POST` | `/v1/drift/audit` | Token | Audit PRD markdown against indexed repository contracts | `DriftReport` (JSON) |
 | `POST` | `/v1/summarize` | Token | Summarize a drift audit into a PM-facing narrative (`offline: true` forces the deterministic template) | `PMDriftSummary` (JSON) |

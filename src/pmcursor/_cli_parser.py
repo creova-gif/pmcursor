@@ -663,4 +663,54 @@ def build_parser() -> argparse.ArgumentParser:
         help="Emit JSON (always on for manifest/convert/token output)",
     )
 
+    orgs_parser = subparsers.add_parser(
+        "orgs",
+        help="Manage team organizations and their API keys.",
+        epilog=(
+            "Examples:\n"
+            "  python3 -m pmcursor.cli orgs create --name Acme\n"
+            "  python3 -m pmcursor.cli orgs list --json\n"
+            "  python3 -m pmcursor.cli orgs issue-key --org-id acme --label ci\n"
+            "  python3 -m pmcursor.cli orgs revoke-key --key-id ab12cd34"
+        ),
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
+    orgs_parser.add_argument(
+        "action",
+        choices=["create", "list", "issue-key", "revoke-key"],
+        help="create: register an org and print its first key; list: show orgs; "
+        "issue-key: mint an additional key; revoke-key: revoke a key by id",
+    )
+    orgs_parser.add_argument(
+        "--store",
+        type=Path,
+        default=None,
+        help="Org registry store path (default: PMCURSOR_ORG_STORE or .pmcursor/orgs.json)",
+    )
+    orgs_parser.add_argument(
+        "--name",
+        default="",
+        help="Organization display name (create action)",
+    )
+    orgs_parser.add_argument(
+        "--org-id",
+        default=None,
+        help="Organization id (create/issue-key actions; derived from --name when omitted)",
+    )
+    orgs_parser.add_argument(
+        "--key-id",
+        default="",
+        help="Key id to revoke (revoke-key action)",
+    )
+    orgs_parser.add_argument(
+        "--label",
+        default="",
+        help="Key label (issue-key action)",
+    )
+    orgs_parser.add_argument(
+        "--json",
+        action="store_true",
+        help="Emit JSON output",
+    )
+
     return parser

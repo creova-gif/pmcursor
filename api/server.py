@@ -92,6 +92,7 @@ from pmcursor.telemetry_verify import (
     TelemetryVerificationReport,
     verify_telemetry_samples,
 )
+from pmcursor.tenancy import OrgRegistry, default_org_registry
 from pmcursor.tickets import TicketSyncReport, audit_ticket_against_repo
 from web.canvas import render_split_pane_canvas
 
@@ -166,20 +167,37 @@ def _decode_webhook_json(payload_body: bytes, content_type: str) -> Any:
     return json.loads(text)
 
 
+def _presented_token(authorization: str, x_pmcursor_token: str) -> str:
+    parts = authorization.strip(" \t").split(None, 1)
+    if len(parts) == 2 and parts[0].lower() == "bearer":
+        return parts[1].strip(" \t")
+    return x_pmcursor_token.strip(" \t")
+
+
 def _require_auth(
     api_token: str | None,
     authorization: str,
     x_pmcursor_token: str,
-) -> None:
+    org_registry: OrgRegistry | None = None,
+) -> str | None:
     resolved_token = (
         api_token
         if api_token is not None
         else os.environ.get("PMCURSOR_API_TOKEN", "")
     )
-    if resolved_token and not _is_authorized(
+    if resolved_token and _is_authorized(
         resolved_token, authorization, x_pmcursor_token
     ):
+        return None
+    if org_registry is not None:
+        org_id = org_registry.resolve_key(
+            _presented_token(authorization, x_pmcursor_token)
+        )
+        if org_id is not None:
+            return org_id
+    if resolved_token or org_registry is not None:
         raise HTTPException(status_code=401, detail="Unauthorized")
+    return None
 
 
 def _resolve_allowed_repo_root(
@@ -398,10 +416,14 @@ def create_app(
     github_api_base: str | None = None,
     auto_run_pull_requests: bool | None = None,
     pr_failure_comments: bool | None = None,
+    org_registry: OrgRegistry | None = None,
 ) -> FastAPI:
     """Create and configure the PMCursor FastAPI application."""
     fastapi_app = FastAPI(title="PMCursor API")
     cache = repo_cache if repo_cache is not None else RepoIndexCache()
+    org_registry = (
+        org_registry if org_registry is not None else default_org_registry()
+    )
     effective_llm_client = llm_client if llm_client is not None else default_llm_client()
     effective_github_app = (
         github_app if github_app is not None else default_github_app()
@@ -564,6 +586,25 @@ def create_app(
     def readyz() -> dict[str, Any]:
         return {"status": "ready", "cached_repos": cache.size}
 
+    @fastapi_app.get("/v1/whoami")
+    def whoami(
+        authorization: str = Header(default="", alias="Authorization"),
+        x_pmcursor_token: str = Header(default="", alias="X-PMCursor-Token"),
+    ) -> dict[str, Any]:
+        org_id = _require_auth(
+            api_token, authorization, x_pmcursor_token, org_registry
+        )
+        if org_id is not None:
+            return {"authenticated": True, "auth": "org-key", "org_id": org_id}
+        resolved_admin = (
+            api_token
+            if api_token is not None
+            else os.environ.get("PMCURSOR_API_TOKEN", "")
+        )
+        if resolved_admin or org_registry is not None:
+            return {"authenticated": True, "auth": "admin", "org_id": None}
+        return {"authenticated": False, "auth": "open", "org_id": None}
+
     @fastapi_app.get("/metrics", response_class=PlainTextResponse)
     def metrics() -> PlainTextResponse:
         with metrics_lock:
@@ -606,7 +647,7 @@ def create_app(
         authorization: str = Header(default="", alias="Authorization"),
         x_pmcursor_token: str = Header(default="", alias="X-PMCursor-Token"),
     ) -> dict[str, Any]:
-        _require_auth(api_token, authorization, x_pmcursor_token)
+        _require_auth(api_token, authorization, x_pmcursor_token, org_registry)
         cleared = cache.size
         cache.clear()
         return {"status": "cleared", "cleared_entries": cleared}
@@ -617,7 +658,7 @@ def create_app(
         authorization: str = Header(default="", alias="Authorization"),
         x_pmcursor_token: str = Header(default="", alias="X-PMCursor-Token"),
     ) -> RepoMap:
-        _require_auth(api_token, authorization, x_pmcursor_token)
+        _require_auth(api_token, authorization, x_pmcursor_token, org_registry)
         repo_path = _resolve_allowed_repo_root(body.repo_root, allowed_workspace_root)
         return cache.get_or_index(repo_path)
 
@@ -627,7 +668,7 @@ def create_app(
         authorization: str = Header(default="", alias="Authorization"),
         x_pmcursor_token: str = Header(default="", alias="X-PMCursor-Token"),
     ) -> DriftReport:
-        _require_auth(api_token, authorization, x_pmcursor_token)
+        _require_auth(api_token, authorization, x_pmcursor_token, org_registry)
         repo_path = _resolve_allowed_repo_root(body.repo_root, allowed_workspace_root)
         repo_map = cache.get_or_index(repo_path)
         return check_spec_drift(
@@ -643,7 +684,7 @@ def create_app(
         authorization: str = Header(default="", alias="Authorization"),
         x_pmcursor_token: str = Header(default="", alias="X-PMCursor-Token"),
     ) -> PMDriftSummary:
-        _require_auth(api_token, authorization, x_pmcursor_token)
+        _require_auth(api_token, authorization, x_pmcursor_token, org_registry)
         repo_path = _resolve_allowed_repo_root(body.repo_root, allowed_workspace_root)
         repo_map = cache.get_or_index(repo_path)
         report = check_spec_drift(
@@ -661,7 +702,7 @@ def create_app(
         authorization: str = Header(default="", alias="Authorization"),
         x_pmcursor_token: str = Header(default="", alias="X-PMCursor-Token"),
     ) -> TicketSyncReport:
-        _require_auth(api_token, authorization, x_pmcursor_token)
+        _require_auth(api_token, authorization, x_pmcursor_token, org_registry)
         repo_path = _resolve_allowed_repo_root(body.repo_root, allowed_workspace_root)
         repo_map = cache.get_or_index(repo_path)
         return audit_ticket_against_repo(
@@ -679,7 +720,7 @@ def create_app(
         authorization: str = Header(default="", alias="Authorization"),
         x_pmcursor_token: str = Header(default="", alias="X-PMCursor-Token"),
     ) -> EdgeCaseChecklist:
-        _require_auth(api_token, authorization, x_pmcursor_token)
+        _require_auth(api_token, authorization, x_pmcursor_token, org_registry)
         repo_path = _resolve_allowed_repo_root(body.repo_root, allowed_workspace_root)
         repo_map = cache.get_or_index(repo_path)
         return generate_edge_case_checklist(
@@ -694,7 +735,7 @@ def create_app(
         authorization: str = Header(default="", alias="Authorization"),
         x_pmcursor_token: str = Header(default="", alias="X-PMCursor-Token"),
     ) -> HTMLResponse:
-        _require_auth(api_token, authorization, x_pmcursor_token)
+        _require_auth(api_token, authorization, x_pmcursor_token, org_registry)
         repo_path = _resolve_allowed_repo_root(body.repo_root, allowed_workspace_root)
         repo_map = cache.get_or_index(repo_path)
         report = check_spec_drift(
@@ -712,7 +753,7 @@ def create_app(
         authorization: str = Header(default="", alias="Authorization"),
         x_pmcursor_token: str = Header(default="", alias="X-PMCursor-Token"),
     ) -> ReleaseNotesReport:
-        _require_auth(api_token, authorization, x_pmcursor_token)
+        _require_auth(api_token, authorization, x_pmcursor_token, org_registry)
         repo_path = _resolve_allowed_repo_root(body.repo_root, allowed_workspace_root)
         repo_map = cache.get_or_index(repo_path)
         return generate_release_notes_and_coverage(
@@ -730,7 +771,7 @@ def create_app(
         authorization: str = Header(default="", alias="Authorization"),
         x_pmcursor_token: str = Header(default="", alias="X-PMCursor-Token"),
     ) -> FlagAuditReport:
-        _require_auth(api_token, authorization, x_pmcursor_token)
+        _require_auth(api_token, authorization, x_pmcursor_token, org_registry)
         repo_path = _resolve_allowed_repo_root(payload.repo_root, allowed_workspace_root)
         return audit_feature_flags_and_rollout(payload.prd_markdown, repo_path)
 
@@ -740,7 +781,7 @@ def create_app(
         authorization: str = Header(default="", alias="Authorization"),
         x_pmcursor_token: str = Header(default="", alias="X-PMCursor-Token"),
     ) -> TelemetryVerificationReport:
-        _require_auth(api_token, authorization, x_pmcursor_token)
+        _require_auth(api_token, authorization, x_pmcursor_token, org_registry)
         if (body.events is None) == (body.source is None):
             raise HTTPException(
                 status_code=422,
@@ -767,7 +808,7 @@ def create_app(
         authorization: str = Header(default="", alias="Authorization"),
         x_pmcursor_token: str = Header(default="", alias="X-PMCursor-Token"),
     ) -> dict[str, Any]:
-        _require_auth(api_token, authorization, x_pmcursor_token)
+        _require_auth(api_token, authorization, x_pmcursor_token, org_registry)
         if not webhook_url.strip():
             raise HTTPException(
                 status_code=422, detail="webhook_url is required"
@@ -791,7 +832,7 @@ def create_app(
         authorization: str = Header(default="", alias="Authorization"),
         x_pmcursor_token: str = Header(default="", alias="X-PMCursor-Token"),
     ) -> GitHubAppCredentials:
-        _require_auth(api_token, authorization, x_pmcursor_token)
+        _require_auth(api_token, authorization, x_pmcursor_token, org_registry)
         try:
             return exchange_manifest_code(body.code)
         except GitHubAppError as exc:
@@ -806,7 +847,7 @@ def create_app(
         authorization: str = Header(default="", alias="Authorization"),
         x_pmcursor_token: str = Header(default="", alias="X-PMCursor-Token"),
     ) -> GitHubInstallationToken:
-        _require_auth(api_token, authorization, x_pmcursor_token)
+        _require_auth(api_token, authorization, x_pmcursor_token, org_registry)
         if effective_github_app is None:
             raise HTTPException(
                 status_code=503,
@@ -827,7 +868,7 @@ def create_app(
         authorization: str = Header(default="", alias="Authorization"),
         x_pmcursor_token: str = Header(default="", alias="X-PMCursor-Token"),
     ) -> OrgDashboardSummary:
-        _require_auth(api_token, authorization, x_pmcursor_token)
+        _require_auth(api_token, authorization, x_pmcursor_token, org_registry)
         repo_path = _resolve_allowed_repo_root(repo_root, allowed_workspace_root)
         prd_file = (repo_path / prd_path).resolve()
         prd_markdown = (
@@ -868,7 +909,7 @@ def create_app(
         authorization: str = Header(default="", alias="Authorization"),
         x_pmcursor_token: str = Header(default="", alias="X-PMCursor-Token"),
     ) -> PublishResult:
-        _require_auth(api_token, authorization, x_pmcursor_token)
+        _require_auth(api_token, authorization, x_pmcursor_token, org_registry)
         try:
             return _dispatch_publish(payload)
         except ValueError as exc:
@@ -1054,7 +1095,7 @@ def create_app(
                     status_code=401, detail="Invalid Jira webhook signature"
                 )
         else:
-            _require_auth(api_token, authorization, x_pmcursor_token)
+            _require_auth(api_token, authorization, x_pmcursor_token, org_registry)
         if (
             dup := _check_duplicate_delivery("jira", x_atlassian_webhook_identifier)
         ) is not None:
