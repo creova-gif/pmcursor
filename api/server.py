@@ -14,7 +14,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 from urllib.parse import parse_qs
 
-from fastapi import FastAPI, Header, HTTPException, Response
+from fastapi import BackgroundTasks, FastAPI, Header, HTTPException, Response
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse, JSONResponse, PlainTextResponse
 from pydantic import ValidationError
@@ -48,6 +48,7 @@ from pmcursor.feature_flags import (
     extract_feature_flags,
 )
 from pmcursor.github_app import (
+    GITHUB_API_BASE,
     GitHubAppAuth,
     GitHubAppCredentials,
     GitHubAppError,
@@ -55,6 +56,13 @@ from pmcursor.github_app import (
     build_app_manifest,
     default_github_app,
     exchange_manifest_code,
+)
+from pmcursor.github_pr_automation import (
+    DEFAULT_PRD_CANDIDATES,
+    PR_AUTOMATION_ACTIONS,
+    GitHubAutomationError,
+    build_repo_client,
+    run_pull_request_automation,
 )
 from pmcursor.llm import (
     LLMClient,
@@ -386,6 +394,8 @@ def create_app(
     cors_origins: list[str] | None = None,
     llm_client: LLMClient | None = None,
     github_app: GitHubAppAuth | None = None,
+    github_api_base: str | None = None,
+    auto_run_pull_requests: bool | None = None,
 ) -> FastAPI:
     """Create and configure the PMCursor FastAPI application."""
     fastapi_app = FastAPI(title="PMCursor API")
@@ -393,6 +403,19 @@ def create_app(
     effective_llm_client = llm_client if llm_client is not None else default_llm_client()
     effective_github_app = (
         github_app if github_app is not None else default_github_app()
+    )
+    effective_github_api_base = (
+        github_api_base
+        or os.environ.get("PMCURSOR_GITHUB_API_BASE")
+        or GITHUB_API_BASE
+    )
+    effective_pr_automation = (
+        auto_run_pull_requests
+        if auto_run_pull_requests is not None
+        else os.environ.get("PMCURSOR_GITHUB_APP_AUTO_RUN", "1")
+        .strip()
+        .lower()
+        not in {"0", "false", "no"}
     )
     effective_rate_limit = _resolve_rate_limit(rate_limit_per_minute)
     effective_trust_proxy = (
@@ -846,6 +869,7 @@ def create_app(
     @fastapi_app.post("/v1/webhooks/github")
     async def github_webhook(
         request: WebhookRequest,
+        background_tasks: BackgroundTasks,
         x_hub_signature_256: str = Header(default="", alias="X-Hub-Signature-256"),
         x_github_delivery: str = Header(default="", alias="X-GitHub-Delivery"),
         x_github_event: str = Header(default="", alias="X-GitHub-Event"),
@@ -873,12 +897,39 @@ def create_app(
             if "pull_request" in data and "prd_markdown" not in data:
                 repo = data.get("repository")
                 repo_name = repo.get("full_name") if isinstance(repo, dict) else None
-                return {
+                response: dict[str, Any] = {
                     "status": "accepted",
                     "action": data.get("action"),
                     "pr_number": data.get("number"),
                     "repository": repo_name,
                 }
+                if (
+                    effective_github_app is not None
+                    and effective_pr_automation
+                    and data.get("action") in PR_AUTOMATION_ACTIONS
+                    and isinstance(data.get("installation"), dict)
+                ):
+                    try:
+                        pr_client = build_repo_client(
+                            data,
+                            github_app=effective_github_app,
+                            api_base=effective_github_api_base,
+                        )
+                    except GitHubAutomationError:
+                        response["automation"] = "skipped:no-installation"
+                    else:
+                        raw_prd = os.environ.get("PMCURSOR_PRD_PATH", "")
+                        prd_candidates = tuple(
+                            p.strip() for p in raw_prd.split(",") if p.strip()
+                        ) or DEFAULT_PRD_CANDIDATES
+                        background_tasks.add_task(
+                            run_pull_request_automation,
+                            data,
+                            client=pr_client,
+                            prd_candidates=prd_candidates,
+                        )
+                        response["automation"] = "queued"
+                return response
             if x_github_event in {
                 "installation",
                 "installation_repositories",

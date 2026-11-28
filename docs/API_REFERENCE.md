@@ -65,7 +65,7 @@ All HTTP responses include the following headers from `request_context_middlewar
 | `GET` | `/v1/dashboard` | Token | Compute organization alignment summary (`repo_root`, `prd_path` query params) | `OrgDashboardSummary` (JSON) |
 | `POST` | `/v1/publish` | Token | Publish a comment to a GitHub PR, Linear issue, or Jira issue | `PublishResult` (JSON) |
 | `POST` | `/v1/cache/clear` | Token | Clear all cached repository index entries | `application/json` |
-| `POST` | `/v1/webhooks/github` | HMAC | Handle GitHub webhook events (`ping`, `pull_request`, or `PRImpactReport` audit) | `PRImpactReport` / JSON |
+| `POST` | `/v1/webhooks/github` | HMAC | Handle GitHub webhook events (`ping`, `pull_request`, installation lifecycle, or `PRImpactReport` audit). When a `GitHubAppAuth` is configured, actionable `pull_request` events queue a background drift audit that posts a check run via the installation token (`PMCURSOR_GITHUB_APP_AUTO_RUN=0` disables) | `PRImpactReport` / JSON |
 | `POST` | `/v1/webhooks/linear` | HMAC | Handle Linear issue webhooks and return a `TicketSyncReport` | `TicketSyncReport` / JSON |
 | `POST` | `/v1/webhooks/jira` | HMAC / Token | Handle Jira issue webhooks and return a `TicketSyncReport` | `TicketSyncReport` / JSON |
 

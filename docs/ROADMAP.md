@@ -29,4 +29,6 @@ This roadmap tracks completed engineering milestones and upcoming platform capab
 
 ## Upcoming Milestones
 
-Completed `M1`–`M20`. In flight: richer GitHub App PR automation (clone + drift + check runs on `pull_request` events) and CI wiring for the `ui/` build.
+| `M21` | GitHub App PR Automation | Added `src/pmcursor/github_pr_automation.py` (`GitHubRepoClient` installation-token REST calls — tarball download, contents fetch, PR diff, check-run creation — `process_pull_request_event`, `run_pull_request_automation`, `check_run_conclusion`, `PullRequestAutomationResult`, `GitHubAutomationError`). The `/v1/webhooks/github` `pull_request` branch queues a background task that downloads the head-SHA tarball (50MB cap, `tarfile filter="data"`), indexes it, computes PR impact against the repo's spec, and posts a check run; failures post a `neutral` check run. Gated by `PMCURSOR_GITHUB_APP_AUTO_RUN` (default on when an app is configured) and `PMCURSOR_GITHUB_API_BASE` for GHES. Also added a `ui` CI job (`npm ci`, `tsc --noEmit`, `next build`). |
+
+Completed `M1`–`M21`. In flight: deeper PR automation polish (issue/PR comments, merge-queue handling) and the multi-tenant team SaaS layer.
