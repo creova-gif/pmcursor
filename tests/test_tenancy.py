@@ -463,6 +463,13 @@ def test_verify_raises_on_corrupt_and_schema_invalid_store(
         registry.verify()
 
 
+def test_verify_rejects_directory_at_store_path(tmp_path: Path) -> None:
+    store_dir = tmp_path / "orgs.json"
+    store_dir.mkdir()
+    with pytest.raises(OrgRegistryError):
+        OrgRegistry(store_dir)
+
+
 def test_readyz_reports_degraded_when_org_store_breaks(tmp_path: Path) -> None:
     registry = _registry(tmp_path)
     client = TestClient(

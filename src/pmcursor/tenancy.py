@@ -100,8 +100,12 @@ class OrgRegistry:
         return self._store_path
 
     def _read_orgs(self) -> dict[str, Org]:
-        if not self._store_path.is_file():
+        if not self._store_path.exists():
             return {}
+        if not self._store_path.is_file():
+            raise OrgRegistryError(
+                f"org store {self._store_path} is not a regular file"
+            )
         try:
             data = json.loads(self._store_path.read_text(encoding="utf-8"))
         except (OSError, json.JSONDecodeError) as exc:
