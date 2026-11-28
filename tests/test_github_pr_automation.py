@@ -400,6 +400,7 @@ def test_run_pull_request_automation_swallows_and_reports(
     fake = _FakeGitHub(tarball=b"not-a-tarball", contents={})
     monkeypatch.setattr(urllib.request, "urlopen", fake)
     result = run_pull_request_automation(_pr_payload(), client=_client())
+    assert result is not None
     assert result.status == "failed"
     assert result.conclusion == "neutral"
     assert len(fake.check_runs) == 1
@@ -410,6 +411,7 @@ def test_run_pull_request_automation_bad_payload() -> None:
     result = run_pull_request_automation(
         {"action": "opened"}, client=_client()
     )
+    assert result is not None
     assert result.status == "failed"
     assert "missing" in result.message
 
