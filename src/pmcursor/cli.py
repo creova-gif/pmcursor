@@ -159,15 +159,17 @@ def _run_doctor(repo_path: Path, *, emit_json: bool) -> int:
     }
 
     if checks["org_store_configured"]:
-        registry = default_org_registry()
-        if registry is None:
-            checks["org_store_healthy"] = False
-        else:
+        try:
+            registry = default_org_registry()
+        except OrgRegistryError:
+            registry = None
+        checks["org_store_healthy"] = False
+        if registry is not None:
             try:
                 registry.verify()
                 checks["org_store_healthy"] = True
             except OrgRegistryError:
-                checks["org_store_healthy"] = False
+                pass
 
     if emit_json:
         print(json.dumps(checks, indent=2))
