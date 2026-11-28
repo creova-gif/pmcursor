@@ -93,7 +93,12 @@ from pmcursor.telemetry_verify import (
     TelemetryVerificationReport,
     verify_telemetry_samples,
 )
-from pmcursor.tenancy import OrgRegistry, OrgRegistryError, default_org_registry
+from pmcursor.tenancy import (
+    ENV_ORG_BACKEND,
+    OrgRegistryError,
+    OrgStore,
+    default_org_registry,
+)
 from pmcursor.tickets import TicketSyncReport, audit_ticket_against_repo
 from web.canvas import render_split_pane_canvas
 
@@ -190,7 +195,7 @@ def _require_auth(
     api_token: str | None,
     authorization: str,
     x_pmcursor_token: str,
-    org_registry: OrgRegistry | None = None,
+    org_registry: OrgStore | None = None,
 ) -> str | None:
     resolved_token = (
         api_token
@@ -220,7 +225,7 @@ def _require_admin(
     api_token: str | None,
     authorization: str,
     x_pmcursor_token: str,
-    org_registry: OrgRegistry | None = None,
+    org_registry: OrgStore | None = None,
 ) -> None:
     """Like _require_auth but rejects organization API keys.
 
@@ -242,7 +247,7 @@ def _resolve_allowed_repo_root(
     repo_root: str,
     allowed_workspace_root: Path | None,
     org_id: str | None = None,
-    org_registry: OrgRegistry | None = None,
+    org_registry: OrgStore | None = None,
 ) -> Path:
     repo_path = Path(repo_root).resolve()
     if allowed_workspace_root is not None and not repo_path.is_relative_to(
@@ -469,7 +474,7 @@ def create_app(
     github_api_base: str | None = None,
     auto_run_pull_requests: bool | None = None,
     pr_failure_comments: bool | None = None,
-    org_registry: OrgRegistry | None = None,
+    org_registry: OrgStore | None = None,
 ) -> FastAPI:
     """Create and configure the PMCursor FastAPI application."""
     fastapi_app = FastAPI(title="PMCursor API")
@@ -1267,12 +1272,13 @@ def run_server(host: str = "127.0.0.1", port: int = 8000) -> None:
             "uvicorn is required to run the server. Install with: pip install 'pmcursor[server]'"
         ) from exc
     if workers > 1:
-        if os.environ.get("PMCURSOR_ORG_STORE", "").strip():
+        org_backend = os.environ.get(ENV_ORG_BACKEND, "").strip().lower()
+        if os.environ.get("PMCURSOR_ORG_STORE", "").strip() and org_backend != "sqlite":
             raise ValueError(
-                "Refusing to start with WEB_CONCURRENCY>1 while PMCURSOR_ORG_STORE is set: "
-                "the file-backed org registry is single-writer and worker processes would "
-                "clobber each other's updates. Run one worker per node or unset "
-                "PMCURSOR_ORG_STORE."
+                "Refusing to start with WEB_CONCURRENCY>1 while PMCURSOR_ORG_STORE uses "
+                "the file backend: it is single-writer and worker processes would clobber "
+                "each other's updates. Set PMCURSOR_ORG_BACKEND=sqlite for multi-worker "
+                "deployments, or run one worker per node."
             )
         logger.warning(
             "WEB_CONCURRENCY>1: rate limiting, index cache, and webhook deduplication are "

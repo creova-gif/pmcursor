@@ -689,6 +689,13 @@ def build_parser() -> argparse.ArgumentParser:
         help="Org registry store path (default: PMCURSOR_ORG_STORE or .pmcursor/orgs.json)",
     )
     orgs_parser.add_argument(
+        "--backend",
+        choices=["file", "sqlite"],
+        default=None,
+        help="Org registry backend (default: PMCURSOR_ORG_BACKEND or file; "
+        "sqlite supports multi-worker/multi-process deployments)",
+    )
+    orgs_parser.add_argument(
         "--name",
         default="",
         help="Organization display name (create action)",

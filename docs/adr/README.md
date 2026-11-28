@@ -15,3 +15,4 @@ Non-trivial design choices for PMCursor are recorded here per `AGENTS.md`. Use
 | [008](008-metrics-auth-and-deployment-hygiene.md) | Metrics endpoint auth and deployment hygiene |
 | [009](009-security-audit-event-logging.md) | Security audit event logging |
 | [010](010-per-org-workspace-roots.md) | Per-org workspace roots — least-privilege repo access for org keys |
+| [ADR-011](011-sqlite-org-registry-backend.md) | SQLite org-registry backend for multi-writer deployments |

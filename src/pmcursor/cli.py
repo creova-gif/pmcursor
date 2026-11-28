@@ -53,8 +53,9 @@ from pmcursor.telemetry_verify import verify_telemetry_samples
 from pmcursor.tenancy import (
     DEFAULT_STORE_PATH,
     ENV_ORG_STORE,
-    OrgRegistry,
     OrgRegistryError,
+    default_org_registry,
+    org_registry_for_path,
 )
 from pmcursor.tickets import audit_ticket_against_repo
 from web.canvas import render_split_pane_canvas
@@ -149,7 +150,26 @@ def _run_doctor(repo_path: Path, *, emit_json: bool) -> int:
         "jira_webhook_secret_configured": bool(
             os.environ.get("PMCURSOR_JIRA_WEBHOOK_SECRET", "").strip()
         ),
+        "github_app_configured": bool(
+            os.environ.get("PMCURSOR_GITHUB_APP_ID", "").strip()
+        ),
+        "org_store_configured": bool(
+            os.environ.get("PMCURSOR_ORG_STORE", "").strip()
+        ),
     }
+
+    if checks["org_store_configured"]:
+        try:
+            registry = default_org_registry()
+        except OrgRegistryError:
+            registry = None
+        checks["org_store_healthy"] = False
+        if registry is not None:
+            try:
+                registry.verify()
+                checks["org_store_healthy"] = True
+            except OrgRegistryError:
+                pass
 
     if emit_json:
         print(json.dumps(checks, indent=2))
@@ -177,7 +197,22 @@ def _run_doctor(repo_path: Path, *, emit_json: bool) -> int:
                 "jira_webhook_secret_configured",
                 "configured" if checks["jira_webhook_secret_configured"] else "unset",
             ),
+            (
+                "github_app_configured",
+                "configured" if checks["github_app_configured"] else "unset",
+            ),
+            (
+                "org_store_configured",
+                "configured" if checks["org_store_configured"] else "unset",
+            ),
         ]
+        if checks["org_store_configured"]:
+            rows.append(
+                (
+                    "org_store_healthy",
+                    "healthy" if checks["org_store_healthy"] else "unreadable",
+                )
+            )
         width = max(len(key) for key, _ in rows)
         print("PMCursor Doctor")
         for key, value in rows:
@@ -903,7 +938,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             else Path(os.environ.get(ENV_ORG_STORE, "") or DEFAULT_STORE_PATH)
         )
         try:
-            registry = OrgRegistry(store_path)
+            registry = org_registry_for_path(store_path, args.backend)
             if args.action == "create":
                 if not args.name.strip():
                     print(

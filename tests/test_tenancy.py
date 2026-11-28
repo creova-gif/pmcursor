@@ -10,7 +10,9 @@ from api.server import create_app
 from pmcursor.tenancy import (
     OrgRegistry,
     OrgRegistryError,
+    SQLiteOrgRegistry,
     default_org_registry,
+    org_registry_for_path,
 )
 
 
@@ -481,3 +483,80 @@ def test_readyz_reports_degraded_when_org_store_breaks(tmp_path: Path) -> None:
     resp = client.get("/readyz")
     assert resp.status_code == 503
     assert resp.json()["detail"] == "org_store_unreadable"
+
+
+def _sqlite_registry(tmp_path: Path) -> SQLiteOrgRegistry:
+    return SQLiteOrgRegistry(tmp_path / "orgs.db")
+
+
+def test_sqlite_backend_parity_with_file_backend(tmp_path: Path) -> None:
+    file_reg = OrgRegistry(tmp_path / "orgs.json")
+    lite_reg = _sqlite_registry(tmp_path)
+
+    for reg in (file_reg, lite_reg):
+        org, key = reg.create_org("Acme Corp")
+        assert org.org_id == "acme-corp"
+        assert key.startswith("pmk_")
+        assert reg.resolve_key(key) == "acme-corp"
+        reg.issue_key("acme-corp", label="ci")
+        reg.add_workspace_root("acme-corp", str(tmp_path))
+        reg.revoke_key(key.split("_")[1])
+        assert reg.resolve_key(key) is None
+        reg.verify()
+
+    file_org = file_reg.get_org("acme-corp")
+    lite_org = lite_reg.get_org("acme-corp")
+    assert file_org is not None and lite_org is not None
+    file_dump = file_org.model_dump(mode="json")
+    lite_dump = lite_org.model_dump(mode="json")
+    for dump in (file_dump, lite_dump):
+        dump.pop("created_at")
+        for key in dump["keys"]:
+            for field in ("key_id", "key_hash", "created_at", "last_used_at"):
+                key.pop(field)
+    assert lite_dump == file_dump
+
+
+def test_sqlite_multi_instance_writes(tmp_path: Path) -> None:
+    reg_a = _sqlite_registry(tmp_path)
+    reg_b = _sqlite_registry(tmp_path)
+
+    _, key_a = reg_a.create_org("Acme", org_id="acme")
+    _, key_b = reg_b.create_org("Beta", org_id="beta")
+
+    assert reg_a.get_org("beta") is not None
+    assert reg_b.get_org("acme") is not None
+    reg_a.add_workspace_root("acme", str(tmp_path))
+    acme_via_b = reg_b.get_org("acme")
+    assert acme_via_b is not None
+    assert str(tmp_path.resolve()) in acme_via_b.workspace_roots
+    assert reg_b.resolve_key(key_a) == "acme"
+    assert reg_a.resolve_key(key_b) == "beta"
+
+
+def test_sqlite_rejects_garbage_and_directory(tmp_path: Path) -> None:
+    bad = tmp_path / "garbage.db"
+    bad.write_bytes(b"not a sqlite database")
+    with pytest.raises(OrgRegistryError):
+        SQLiteOrgRegistry(bad)
+
+    store_dir = tmp_path / "dir.db"
+    store_dir.mkdir()
+    with pytest.raises(OrgRegistryError):
+        SQLiteOrgRegistry(store_dir)
+
+
+def test_backend_selection(tmp_path: Path) -> None:
+    assert isinstance(org_registry_for_path(tmp_path / "a.json"), OrgRegistry)
+    assert isinstance(
+        org_registry_for_path(tmp_path / "a.db", "sqlite"), SQLiteOrgRegistry
+    )
+    assert isinstance(
+        default_org_registry(
+            {"PMCURSOR_ORG_STORE": str(tmp_path / "b.db"), "PMCURSOR_ORG_BACKEND": "sqlite"}
+        ),
+        SQLiteOrgRegistry,
+    )
+    assert default_org_registry({}) is None
+    with pytest.raises(OrgRegistryError):
+        org_registry_for_path(tmp_path / "c.json", "banana")

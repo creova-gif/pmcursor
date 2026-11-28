@@ -25,5 +25,5 @@
 ## Known limits (residual risk)
 
 - **Single-process state:** The rate limiter, index cache, deduplicator, and file-backed org store are per-process — run one uvicorn worker (`WEB_CONCURRENCY=1`) or accept weakened limits / lost store updates. Shared-state backends are a deliberate future migration.
-- **File-backed registry:** `orgs.json` suits single-node deployments; concurrent writers on a shared filesystem are not safe. A database-backed registry belongs to the accounts layer.
+- **File-backed registry is single-writer:** the default JSON store is unsafe under concurrent writers; `PMCURSOR_ORG_BACKEND=sqlite` is the multi-worker-safe backend (WAL + busy_timeout). Both are single-node — a network database belongs to the accounts layer.
 - **Audit trail is log-based:** durability/routing is the deployment's log pipeline (stdout → collector), not a built-in store.
