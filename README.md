@@ -113,6 +113,12 @@ PMCursor adapts plugin packaging and CLI conventions from [`cursor/plugins`](htt
 	```bash
 	PYTHONPATH=src python3 -m pmcursor.cli doctor --repo .
 	```
+18. Drive the installable GitHub App flow: emit a creation manifest (POST it to `https://github.com/settings/apps/new`), exchange the redirect `code` for app credentials, and mint installation tokens (requires `pmcursor[github-app]` plus `PMCURSOR_GITHUB_APP_ID` and `PMCURSOR_GITHUB_APP_PRIVATE_KEY`/`_PATH`).
+	```bash
+	PYTHONPATH=src python3 -m pmcursor.cli github-app manifest --webhook-url https://pm.example.com/v1/webhooks/github
+	PYTHONPATH=src python3 -m pmcursor.cli github-app convert --code <redirect-code>
+	PYTHONPATH=src python3 -m pmcursor.cli github-app token --installation-id 12345
+	```
 18. Publish a drift report or comment to GitHub PRs, Linear issues, or Jira issues (supports `--dry-run`).
 	```bash
 	PYTHONPATH=src python3 -m pmcursor.cli publish --provider github --target owner/repo#42 --body-file report.md --dry-run
@@ -171,6 +177,9 @@ docker compose up --build
 - `POST /v1/release-notes`
 - `POST /v1/flags/audit`
 - `POST /v1/telemetry/verify`
+- `GET /v1/github-app/manifest`
+- `POST /v1/github-app/manifest/conversions`
+- `POST /v1/github-app/installations/{installation_id}/token`
 - `POST /v1/publish` (publish comments to GitHub PRs, Linear issues, or Jira issues)
 - `GET /v1/dashboard`
 

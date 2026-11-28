@@ -74,6 +74,10 @@ class TelemetryVerifyRequest(BaseModel):
     limit: int = 500
 
 
+class GitHubManifestConversionRequest(BaseModel):
+    code: str
+
+
 class OrgDashboardSummary(BaseModel):
     model_config = ConfigDict(frozen=True)
 

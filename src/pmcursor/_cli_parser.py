@@ -600,4 +600,67 @@ def build_parser() -> argparse.ArgumentParser:
         help="Emit JSON PMDriftSummary",
     )
 
+    github_app_parser = subparsers.add_parser(
+        "github-app",
+        help="GitHub App manifest flow and installation tokens.",
+        epilog=(
+            "Examples:\n"
+            "  python3 -m pmcursor.cli github-app manifest --webhook-url https://pm.example.com/v1/webhooks/github\n"
+            "  python3 -m pmcursor.cli github-app convert --code abc123\n"
+            "  python3 -m pmcursor.cli github-app token --installation-id 12345"
+        ),
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
+    github_app_parser.add_argument(
+        "action",
+        choices=["manifest", "convert", "token"],
+        help="manifest: emit app creation JSON; convert: exchange a manifest code; token: mint an installation token",
+    )
+    github_app_parser.add_argument(
+        "--webhook-url",
+        default="",
+        help="Public URL for /v1/webhooks/github (manifest action)",
+    )
+    github_app_parser.add_argument(
+        "--redirect-url",
+        default=None,
+        help="URL GitHub redirects to after app creation (manifest action)",
+    )
+    github_app_parser.add_argument(
+        "--name",
+        default="pmcursor-drift",
+        help="GitHub App name (manifest action, default: pmcursor-drift)",
+    )
+    github_app_parser.add_argument(
+        "--homepage-url",
+        default="https://github.com/creova-gif/pmcursor",
+        help="GitHub App homepage URL (manifest action)",
+    )
+    github_app_parser.add_argument(
+        "--public",
+        action="store_true",
+        help="Mark the app public in the manifest (default: private)",
+    )
+    github_app_parser.add_argument(
+        "--code",
+        default="",
+        help="Manifest conversion code from the GitHub redirect (convert action)",
+    )
+    github_app_parser.add_argument(
+        "--installation-id",
+        type=int,
+        default=0,
+        help="GitHub App installation ID (token action)",
+    )
+    github_app_parser.add_argument(
+        "--api-base",
+        default="https://api.github.com",
+        help="GitHub API base URL (GitHub Enterprise)",
+    )
+    github_app_parser.add_argument(
+        "--json",
+        action="store_true",
+        help="Emit JSON (always on for manifest/convert/token output)",
+    )
+
     return parser

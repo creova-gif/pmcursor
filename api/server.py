@@ -24,6 +24,7 @@ from api import (
     ChecklistRequest,
     DriftAuditRequest,
     FlagAuditRequest,
+    GitHubManifestConversionRequest,
     GitHubWebhookPayload,
     OrgDashboardSummary,
     PublishCommentRequest,
@@ -44,6 +45,15 @@ from pmcursor.feature_flags import (
     FlagAuditReport,
     audit_feature_flags_and_rollout,
     extract_feature_flags,
+)
+from pmcursor.github_app import (
+    GitHubAppAuth,
+    GitHubAppCredentials,
+    GitHubAppError,
+    GitHubInstallationToken,
+    build_app_manifest,
+    default_github_app,
+    exchange_manifest_code,
 )
 from pmcursor.llm import (
     LLMClient,
@@ -374,11 +384,15 @@ def create_app(
     trust_proxy: bool | None = None,
     cors_origins: list[str] | None = None,
     llm_client: LLMClient | None = None,
+    github_app: GitHubAppAuth | None = None,
 ) -> FastAPI:
     """Create and configure the PMCursor FastAPI application."""
     fastapi_app = FastAPI(title="PMCursor API")
     cache = repo_cache if repo_cache is not None else RepoIndexCache()
     effective_llm_client = llm_client if llm_client is not None else default_llm_client()
+    effective_github_app = (
+        github_app if github_app is not None else default_github_app()
+    )
     effective_rate_limit = _resolve_rate_limit(rate_limit_per_minute)
     effective_trust_proxy = (
         trust_proxy
@@ -700,6 +714,68 @@ def create_app(
             )
         return verify_telemetry_samples(repo_map, body.events or [])
 
+    @fastapi_app.get("/v1/github-app/manifest")
+    def github_app_manifest_endpoint(
+        name: str = "pmcursor-drift",
+        webhook_url: str = "",
+        redirect_url: str | None = None,
+        homepage_url: str = "https://github.com/creova-gif/pmcursor",
+        authorization: str = Header(default="", alias="Authorization"),
+        x_pmcursor_token: str = Header(default="", alias="X-PMCursor-Token"),
+    ) -> dict[str, Any]:
+        _require_auth(api_token, authorization, x_pmcursor_token)
+        if not webhook_url.strip():
+            raise HTTPException(
+                status_code=422, detail="webhook_url is required"
+            )
+        try:
+            return build_app_manifest(
+                name=name,
+                webhook_url=webhook_url,
+                redirect_url=redirect_url,
+                homepage_url=homepage_url,
+            )
+        except (GitHubAppError, ValueError) as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+    @fastapi_app.post(
+        "/v1/github-app/manifest/conversions",
+        response_model=GitHubAppCredentials,
+    )
+    def github_app_manifest_conversion_endpoint(
+        body: GitHubManifestConversionRequest,
+        authorization: str = Header(default="", alias="Authorization"),
+        x_pmcursor_token: str = Header(default="", alias="X-PMCursor-Token"),
+    ) -> GitHubAppCredentials:
+        _require_auth(api_token, authorization, x_pmcursor_token)
+        try:
+            return exchange_manifest_code(body.code)
+        except GitHubAppError as exc:
+            raise HTTPException(status_code=502, detail=str(exc)) from exc
+
+    @fastapi_app.post(
+        "/v1/github-app/installations/{installation_id}/token",
+        response_model=GitHubInstallationToken,
+    )
+    def github_app_installation_token_endpoint(
+        installation_id: int,
+        authorization: str = Header(default="", alias="Authorization"),
+        x_pmcursor_token: str = Header(default="", alias="X-PMCursor-Token"),
+    ) -> GitHubInstallationToken:
+        _require_auth(api_token, authorization, x_pmcursor_token)
+        if effective_github_app is None:
+            raise HTTPException(
+                status_code=503,
+                detail=(
+                    "GitHub App is not configured. Set PMCURSOR_GITHUB_APP_ID "
+                    "and PMCURSOR_GITHUB_APP_PRIVATE_KEY."
+                ),
+            )
+        try:
+            return effective_github_app.installation_token(installation_id)
+        except GitHubAppError as exc:
+            raise HTTPException(status_code=502, detail=str(exc)) from exc
+
     @fastapi_app.get("/v1/dashboard", response_model=OrgDashboardSummary)
     def dashboard_endpoint(
         repo_root: str = ".",
@@ -761,6 +837,7 @@ def create_app(
         request: WebhookRequest,
         x_hub_signature_256: str = Header(default="", alias="X-Hub-Signature-256"),
         x_github_delivery: str = Header(default="", alias="X-GitHub-Delivery"),
+        x_github_event: str = Header(default="", alias="X-GitHub-Event"),
     ) -> PRImpactReport | dict[str, Any]:
         payload_body = await _read_bounded_webhook_body(request)
         secret = (
@@ -790,6 +867,23 @@ def create_app(
                     "action": data.get("action"),
                     "pr_number": data.get("number"),
                     "repository": repo_name,
+                }
+            if x_github_event in {
+                "installation",
+                "installation_repositories",
+                "installation_target",
+            }:
+                installation = data.get("installation")
+                install_id = (
+                    installation.get("id")
+                    if isinstance(installation, dict)
+                    else None
+                )
+                return {
+                    "status": "accepted",
+                    "event": x_github_event,
+                    "action": data.get("action"),
+                    "installation_id": install_id,
                 }
         try:
             payload = GitHubWebhookPayload.model_validate(data)

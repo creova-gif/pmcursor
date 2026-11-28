@@ -24,6 +24,12 @@ from pmcursor.feature_flags import (
     extract_feature_flags,
 )
 from pmcursor.federation import index_federated_repos
+from pmcursor.github_app import (
+    GitHubAppError,
+    build_app_manifest,
+    default_github_app,
+    exchange_manifest_code,
+)
 from pmcursor.indexer import index_repository
 from pmcursor.llm import default_llm_client, summarize_drift_report
 from pmcursor.mcp_server import run_mcp_server
@@ -726,6 +732,50 @@ def main(argv: Sequence[str] | None = None) -> int:
                 end="" if telemetry_report.markdown.endswith("\n") else "\n",
             )
         return 0
+
+    if args.command == "github-app":
+        try:
+            if args.action == "manifest":
+                if not args.webhook_url.strip():
+                    print(
+                        "Error: --webhook-url is required for the manifest action.\n"
+                        "  Try: python3 -m pmcursor.cli github-app manifest --webhook-url https://pm.example.com/v1/webhooks/github",
+                        file=sys.stderr,
+                    )
+                    return 2
+                manifest = build_app_manifest(
+                    name=args.name,
+                    webhook_url=args.webhook_url,
+                    redirect_url=args.redirect_url,
+                    homepage_url=args.homepage_url,
+                    public=args.public,
+                )
+                print(json.dumps(manifest, indent=2))
+                return 0
+            if args.action == "convert":
+                creds = exchange_manifest_code(args.code, api_base=args.api_base)
+                print(creds.model_dump_json(indent=2))
+                return 0
+            app_auth = default_github_app()
+            if app_auth is None:
+                print(
+                    "Error: GitHub App is not configured. Set PMCURSOR_GITHUB_APP_ID and PMCURSOR_GITHUB_APP_PRIVATE_KEY.",
+                    file=sys.stderr,
+                )
+                return 2
+            if args.installation_id <= 0:
+                print(
+                    "Error: --installation-id is required for the token action.\n"
+                    "  Try: python3 -m pmcursor.cli github-app token --installation-id 12345",
+                    file=sys.stderr,
+                )
+                return 2
+            token = app_auth.installation_token(args.installation_id)
+            print(token.model_dump_json(indent=2))
+            return 0
+        except (GitHubAppError, ValueError) as exc:
+            print(f"Error: {exc}", file=sys.stderr)
+            return 2
 
     if args.command == "dashboard":
         repo_path = args.repo
