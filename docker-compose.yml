@@ -12,8 +12,28 @@ services:
       PMCURSOR_TRUST_PROXY: ${PMCURSOR_TRUST_PROXY:-false}
       PMCURSOR_CORS_ORIGINS: ${PMCURSOR_CORS_ORIGINS:-}
       WEB_CONCURRENCY: ${WEB_CONCURRENCY:-1}
+      # LLM summaries / GitHub App / telemetry / tenancy — set in .env
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      PMCURSOR_GITHUB_APP_ID: ${PMCURSOR_GITHUB_APP_ID:-}
+      PMCURSOR_GITHUB_APP_PRIVATE_KEY: ${PMCURSOR_GITHUB_APP_PRIVATE_KEY:-}
+      PMCURSOR_GITHUB_APP_PRIVATE_KEY_PATH: ${PMCURSOR_GITHUB_APP_PRIVATE_KEY_PATH:-}
+      PMCURSOR_GITHUB_APP_AUTO_RUN: ${PMCURSOR_GITHUB_APP_AUTO_RUN:-1}
+      PMCURSOR_GITHUB_APP_PR_COMMENTS: ${PMCURSOR_GITHUB_APP_PR_COMMENTS:-1}
+      PMCURSOR_GITHUB_API_BASE: ${PMCURSOR_GITHUB_API_BASE:-}
+      PMCURSOR_ORG_STORE: ${PMCURSOR_ORG_STORE:-/orgs/orgs.json}
+      LANGFUSE_HOST: ${LANGFUSE_HOST:-}
+      LANGFUSE_PUBLIC_KEY: ${LANGFUSE_PUBLIC_KEY:-}
+      LANGFUSE_SECRET_KEY: ${LANGFUSE_SECRET_KEY:-}
+      PMCURSOR_BQ_PROJECT: ${PMCURSOR_BQ_PROJECT:-}
+      PMCURSOR_BQ_DATASET: ${PMCURSOR_BQ_DATASET:-}
+      PMCURSOR_BQ_TABLE: ${PMCURSOR_BQ_TABLE:-}
+      LINEAR_API_KEY: ${LINEAR_API_KEY:-}
+      PMCURSOR_JIRA_API_TOKEN: ${PMCURSOR_JIRA_API_TOKEN:-}
+      PMCURSOR_JIRA_BASE_URL: ${PMCURSOR_JIRA_BASE_URL:-}
     volumes:
       - .:/workspace:ro
+      # Writable store for the org registry (workspace mounts read-only).
+      - pmcursor-orgs:/orgs
     restart: unless-stopped
     healthcheck:
       test:
@@ -27,3 +47,5 @@ services:
       timeout: 5s
       retries: 3
       start_period: 10s
+volumes:
+  pmcursor-orgs:

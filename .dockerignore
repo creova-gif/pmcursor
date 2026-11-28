@@ -9,3 +9,10 @@ build/
 dist/
 *.egg-info
 tests/
+.env
+.env.*
+!.env.example
+.pmcursor/
+.pmcursor-verify/
+ui/node_modules/
+ui/.next/
