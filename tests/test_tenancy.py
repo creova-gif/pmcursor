@@ -284,3 +284,29 @@ def test_org_scoped_rate_limit_bucket(tmp_path: Path) -> None:
         "/v1/whoami", headers={"Authorization": f"Bearer {key_b}"}
     )
     assert other.status_code == 200
+
+
+def test_metrics_requires_admin_when_auth_configured(tmp_path: Path) -> None:
+    registry = _registry(tmp_path)
+    _, api_key = registry.create_org("Acme", org_id="acme")
+    client = TestClient(
+        create_app(api_token="admintoken", org_registry=registry)
+    )
+    # Global counters span tenants — org keys and anonymous callers get nothing.
+    assert client.get("/metrics").status_code == 401
+    assert (
+        client.get(
+            "/metrics", headers={"Authorization": f"Bearer {api_key}"}
+        ).status_code
+        == 403
+    )
+    resp = client.get(
+        "/metrics", headers={"Authorization": "Bearer admintoken"}
+    )
+    assert resp.status_code == 200
+    assert "pmcursor_http_requests_total" in resp.text
+
+
+def test_metrics_open_in_unauthenticated_mode() -> None:
+    client = TestClient(create_app(api_token=""))
+    assert client.get("/metrics").status_code == 200

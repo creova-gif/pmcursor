@@ -641,7 +641,11 @@ def create_app(
         return {"authenticated": False, "auth": "open", "org_id": None}
 
     @fastapi_app.get("/metrics", response_class=PlainTextResponse)
-    def metrics() -> PlainTextResponse:
+    def metrics(
+        authorization: str = Header(default="", alias="Authorization"),
+        x_pmcursor_token: str = Header(default="", alias="X-PMCursor-Token"),
+    ) -> PlainTextResponse:
+        _require_admin(api_token, authorization, x_pmcursor_token, org_registry)
         with metrics_lock:
             current_total_requests = total_requests
             current_error_requests = error_requests

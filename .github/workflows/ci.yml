@@ -44,3 +44,12 @@ jobs:
         run: npm run typecheck
       - name: Build
         run: npm run build
+
+  docker:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - name: Build image
+        run: docker build -t pmcursor-ci .
+      - name: Smoke check image
+        run: docker run --rm --entrypoint python3 pmcursor-ci -c "import pmcursor; import api.server"

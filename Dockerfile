@@ -23,7 +23,8 @@ ENV PYTHONPATH="/app/src:/app" \
 WORKDIR /app
 
 RUN groupadd --system pmcursor \
-    && useradd --system --gid pmcursor --create-home --home-dir /home/pmcursor pmcursor
+    && useradd --system --gid pmcursor --create-home --home-dir /home/pmcursor pmcursor \
+    && mkdir -p /orgs && chown pmcursor:pmcursor /orgs
 
 COPY --from=builder /install /usr/local
 COPY --chown=pmcursor:pmcursor pyproject.toml ./
