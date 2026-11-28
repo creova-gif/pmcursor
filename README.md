@@ -2,7 +2,7 @@
 
 [![CI](https://github.com/creova-gif/pmcursor/actions/workflows/ci.yml/badge.svg)](https://github.com/creova-gif/pmcursor/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
-[![Version](https://img.shields.io/badge/version-v0.2.0-blue.svg)](CHANGELOG.md)
+[![Version](https://img.shields.io/badge/version-v0.3.0-blue.svg)](CHANGELOG.md)
 [![Python 3.11+](https://img.shields.io/badge/python-3.11+-blue.svg)](https://www.python.org/downloads/)
 [![Coverage >= 80%](https://img.shields.io/badge/coverage-%3E%3D80%25-brightgreen.svg)](.github/workflows/ci.yml)
 
