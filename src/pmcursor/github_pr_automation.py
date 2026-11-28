@@ -21,9 +21,12 @@ from pmcursor.publisher import _validate_outbound_url
 logger = logging.getLogger(__name__)
 
 _MAX_TARBALL_BYTES = 50 * 1024 * 1024
+_MAX_EXTRACTED_BYTES = 200 * 1024 * 1024
+_MAX_TAR_MEMBERS = 50_000
 _MAX_DIFF_BYTES = 1024 * 1024
 _CHECK_RUN_SUMMARY_LIMIT = 60_000
 _TARBALL_CHUNK = 64 * 1024
+_FINDINGS_LIMIT = 25
 
 PR_AUTOMATION_ACTIONS: frozenset[str] = frozenset(
     {"opened", "synchronize", "reopened", "ready_for_review"}
@@ -188,9 +191,18 @@ class GitHubRepoClient:
                 ) from exc
         return content
 
-    def fetch_pr_diff(self, repo_full_name: str, pr_number: int) -> str:
-        """Return the PR diff text, truncated at the configured cap."""
-        url = f"{self._api_base}/repos/{repo_full_name}/pulls/{pr_number}"
+    def fetch_compare_diff(
+        self, repo_full_name: str, base_sha: str, head_sha: str
+    ) -> str:
+        """Return the base...head diff text, truncated at the configured cap.
+
+        Pinned to immutable commits so a push landing mid-pipeline cannot
+        swap in a diff that mismatches the indexed head tree.
+        """
+        url = (
+            f"{self._api_base}/repos/{repo_full_name}"
+            f"/compare/{base_sha}...{head_sha}"
+        )
         raw = self._open(url, accept="application/vnd.github.diff")
         if len(raw) > self._max_diff_bytes:
             raw = raw[: self._max_diff_bytes]
@@ -209,9 +221,16 @@ class GitHubRepoClient:
         conclusion: str,
         title: str,
         summary: str,
+        text: str = "",
     ) -> None:
         """Post a completed check run to the PR's head commit."""
         url = f"{self._api_base}/repos/{repo_full_name}/check-runs"
+        output: dict[str, str] = {
+            "title": title,
+            "summary": summary[:_CHECK_RUN_SUMMARY_LIMIT],
+        }
+        if text:
+            output["text"] = text[:_CHECK_RUN_SUMMARY_LIMIT]
         self._open(
             url,
             accept="application/vnd.github+json",
@@ -221,18 +240,38 @@ class GitHubRepoClient:
                 "head_sha": head_sha,
                 "status": "completed",
                 "conclusion": conclusion,
-                "output": {
-                    "title": title,
-                    "summary": summary[:_CHECK_RUN_SUMMARY_LIMIT],
-                },
+                "output": output,
             },
         )
 
 
-def _extract_tarball(tarball_path: Path, dest_dir: Path) -> Path:
-    """Extract a GitHub tarball safely; return the repo root inside."""
+def _extract_tarball(
+    tarball_path: Path,
+    dest_dir: Path,
+    *,
+    max_extracted_bytes: int = _MAX_EXTRACTED_BYTES,
+    max_members: int = _MAX_TAR_MEMBERS,
+) -> Path:
+    """Extract a GitHub tarball safely; return the repo root inside.
+
+    `filter="data"` bounds member paths and types; the cumulative size and
+    member-count caps bound decompression, which the download cap cannot.
+    """
     try:
         with tarfile.open(tarball_path, "r:gz") as tar:
+            total_size = 0
+            for count, member in enumerate(tar.getmembers(), start=1):
+                if count > max_members:
+                    raise GitHubAutomationError(
+                        f"Repository tarball has more than {max_members} "
+                        "members; refusing to extract"
+                    )
+                total_size += member.size
+                if total_size > max_extracted_bytes:
+                    raise GitHubAutomationError(
+                        f"Repository tarball expands beyond "
+                        f"{max_extracted_bytes} bytes; refusing to extract"
+                    )
             tar.extractall(dest_dir, filter="data")
             roots = [m.name.split("/")[0] for m in tar.getmembers() if "/" in m.name]
     except tarfile.TarError as exc:
@@ -245,6 +284,25 @@ def _extract_tarball(tarball_path: Path, dest_dir: Path) -> Path:
     if not root.is_dir():
         raise GitHubAutomationError("Repository tarball has unexpected layout")
     return root
+
+
+def _findings_text(report: DriftReport) -> str:
+    """Render drift findings as markdown for the check-run `text` field."""
+    if not report.findings:
+        return ""
+    lines = ["## Drift findings", ""]
+    for finding in report.findings[:_FINDINGS_LIMIT]:
+        ref = finding.code_citation or finding.spec_reference
+        lines.append(
+            f"- **{finding.severity}** `{finding.category}` "
+            f"{finding.message} (`{ref}`)"
+        )
+        lines.append(f"  - Remediation: {finding.remediation}")
+    if len(report.findings) > _FINDINGS_LIMIT:
+        lines.append(
+            f"- …and {len(report.findings) - _FINDINGS_LIMIT} more findings"
+        )
+    return "\n".join(lines)
 
 
 def check_run_conclusion(report: DriftReport) -> str:
@@ -272,6 +330,8 @@ def process_pull_request_event(
     repo_name = repo_obj.get("full_name") if isinstance(repo_obj, dict) else None
     head_obj = pr_obj.get("head") if isinstance(pr_obj, dict) else None
     head_sha = head_obj.get("sha") if isinstance(head_obj, dict) else None
+    base_obj = pr_obj.get("base") if isinstance(pr_obj, dict) else None
+    base_sha = base_obj.get("sha") if isinstance(base_obj, dict) else None
     pr_number = payload.get("number")
     installation_id = (
         install_obj.get("id") if isinstance(install_obj, dict) else None
@@ -284,6 +344,8 @@ def process_pull_request_event(
         )
     if not (isinstance(head_sha, str) and head_sha):
         raise GitHubAutomationError("pull_request payload missing head.sha")
+    if not (isinstance(base_sha, str) and base_sha):
+        raise GitHubAutomationError("pull_request payload missing base.sha")
     if not isinstance(installation_id, int) or installation_id <= 0:
         raise GitHubAutomationError("pull_request payload missing installation.id")
 
@@ -318,7 +380,7 @@ def process_pull_request_event(
             if prd_markdown:
                 prd_path = candidate
                 break
-        if prd_markdown is None:
+        if not prd_markdown:
             tried = ", ".join(prd_candidates)
             client.create_check_run(
                 repo_name,
@@ -335,7 +397,7 @@ def process_pull_request_event(
                 "skipped", "neutral", f"no PRD found at candidates: {tried}"
             )
 
-        diff_text = client.fetch_pr_diff(repo_name, pr_number)
+        diff_text = client.fetch_compare_diff(repo_name, base_sha, head_sha)
         impact = compute_pr_impact(
             prd_markdown,
             diff_text,
@@ -352,6 +414,7 @@ def process_pull_request_event(
             conclusion=conclusion,
             title=f"PMCursor drift — {impact.drift_report.status}",
             summary=impact.markdown_comment,
+            text=_findings_text(impact.drift_report),
         )
         return _result(
             "completed",

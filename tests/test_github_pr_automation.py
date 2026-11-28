@@ -114,7 +114,7 @@ class _FakeGitHub:
                     }
                 )
             raise _http_404(url)
-        if "/pulls/" in url:
+        if "/compare/" in url:
             return _Resp(self.diff)
         if "/check-runs" in url and isinstance(req.data, bytes):
             self.check_runs.append(json.loads(req.data.decode("utf-8")))
@@ -154,7 +154,7 @@ def _pr_payload(**overrides: Any) -> dict[str, Any]:
         "repository": {"full_name": "octo/repo", "default_branch": "main"},
         "pull_request": {
             "head": {"sha": "abc123def", "ref": "feat/x"},
-            "base": {"ref": "main"},
+            "base": {"sha": "def456abc", "ref": "main"},
         },
         "installation": {"id": 7},
     }
@@ -240,7 +240,9 @@ def test_fetch_file_missing_returns_none(
     assert _client().fetch_file("octo/repo", "PRD.md", "abc123def") is None
 
 
-def test_fetch_pr_diff_truncates(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_fetch_compare_diff_truncates(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     _install_fake_jwt(monkeypatch)
     fake = _FakeGitHub(tarball=b"", contents={}, diff=b"x" * 4096)
     monkeypatch.setattr(urllib.request, "urlopen", fake)
@@ -250,9 +252,10 @@ def test_fetch_pr_diff_truncates(monkeypatch: pytest.MonkeyPatch) -> None:
         api_base=_FAKE_API,
         max_diff_bytes=1024,
     )
-    diff = client.fetch_pr_diff("octo/repo", 5)
+    diff = client.fetch_compare_diff("octo/repo", "def456abc", "abc123def")
     assert "diff truncated" in diff
     assert len(diff) < 4096
+    assert "/compare/def456abc...abc123def" in fake.urls[-1]
 
 
 def test_check_run_conclusion_mapping() -> None:
@@ -293,6 +296,42 @@ def test_process_pull_request_event_posts_check_run(
     assert run["status"] == "completed"
     assert run["conclusion"] in {"success", "failure", "neutral"}
     assert run["output"]["title"].startswith("PMCursor drift")
+
+
+def test_process_pull_request_event_empty_prd_posts_neutral(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _install_fake_jwt(monkeypatch)
+    fake = _FakeGitHub(
+        tarball=_make_tarball(_REPO_FILES),
+        contents={"PROJECT_SPEC.md": ""},
+    )
+    monkeypatch.setattr(urllib.request, "urlopen", fake)
+    result = process_pull_request_event(_pr_payload(), client=_client())
+    assert result.status == "skipped"
+    assert fake.check_runs[0]["conclusion"] == "neutral"
+
+
+def test_process_pull_request_event_includes_findings(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _install_fake_jwt(monkeypatch)
+    prd = (
+        "# Spec\n\nUser model has `username` at app/models.py:2.\n"
+        "See also docs/nothing.md:1.\n"
+    )
+    fake = _FakeGitHub(
+        tarball=_make_tarball(_REPO_FILES),
+        contents={"PROJECT_SPEC.md": prd},
+        diff=_DIFF.encode("utf-8"),
+    )
+    monkeypatch.setattr(urllib.request, "urlopen", fake)
+    result = process_pull_request_event(_pr_payload(), client=_client())
+    assert result.status == "completed"
+    run = fake.check_runs[0]
+    assert "text" in run["output"]
+    assert "Drift findings" in run["output"]["text"]
+    assert "Remediation" in run["output"]["text"]
 
 
 def test_process_pull_request_event_no_prd_posts_neutral(
@@ -495,6 +534,23 @@ def test_webhook_auto_run_disabled(
     assert resp.status_code == 200
     assert "automation" not in resp.json()
     assert not called
+
+
+def test_tarball_rejects_oversized_expansion(tmp_path: Path) -> None:
+    tar_path = tmp_path / "bomb.tar.gz"
+    tar_path.write_bytes(_make_tarball({"big.bin": "x" * 10_000}))
+    with pytest.raises(GitHubAutomationError, match="expands beyond"):
+        _extract_tarball(
+            tar_path, tmp_path / "out", max_extracted_bytes=1024
+        )
+
+
+def test_tarball_rejects_member_count_cap(tmp_path: Path) -> None:
+    files = {f"f{i}.txt": "x" for i in range(10)}
+    tar_path = tmp_path / "many.tar.gz"
+    tar_path.write_bytes(_make_tarball(files))
+    with pytest.raises(GitHubAutomationError, match="members"):
+        _extract_tarball(tar_path, tmp_path / "out", max_members=5)
 
 
 def test_tarball_rejects_path_traversal(tmp_path: Path) -> None:
