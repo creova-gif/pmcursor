@@ -18,7 +18,7 @@ jobs:
         with:
           python-version: "3.12"
       - name: Install build and test dependencies
-        run: pip install build pytest ruff mypy pydantic fastapi httpx
+        run: pip install build twine pytest ruff mypy pydantic fastapi httpx
       - name: Lint
         run: ruff check src indexer api web evals tests
       - name: Type check
@@ -31,6 +31,8 @@ jobs:
         run: PYTHONPATH=src python -m pmcursor.cli eval --json
       - name: Build package
         run: python -m build
+      - name: Verify distributions
+        run: twine check dist/*
       - name: Upload build artifacts
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
