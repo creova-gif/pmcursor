@@ -21,6 +21,15 @@ from pmcursor.feature_flags import (
     extract_feature_flags,
 )
 from pmcursor.federation import index_federated_repos, merge_repo_maps
+from pmcursor.github_app import (
+    GitHubAppAuth,
+    GitHubAppCredentials,
+    GitHubAppError,
+    GitHubInstallationToken,
+    build_app_manifest,
+    default_github_app,
+    exchange_manifest_code,
+)
 from pmcursor.indexer import index_repository
 from pmcursor.llm import (
     AnthropicLLMClient,
@@ -104,6 +113,10 @@ __all__ = [
     "FieldContract",
     "FixPrdResult",
     "FlagAuditReport",
+    "GitHubAppAuth",
+    "GitHubAppCredentials",
+    "GitHubAppError",
+    "GitHubInstallationToken",
     "LLMClient",
     "LLMUnavailableError",
     "LangfuseConnector",
@@ -132,10 +145,13 @@ __all__ = [
     "TicketSyncReport",
     "audit_feature_flags_and_rollout",
     "audit_ticket_against_repo",
+    "build_app_manifest",
     "check_spec_drift",
     "compute_scope_coverage",
+    "default_github_app",
     "default_llm_client",
     "drift_report_to_sarif",
+    "exchange_manifest_code",
     "extract_feature_flags",
     "fetch_telemetry_events",
     "fix_prd_markdown",

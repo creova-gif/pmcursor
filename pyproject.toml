@@ -13,6 +13,7 @@ dependencies = ["pydantic>=2.9"]
 server = ["fastapi>=0.115", "uvicorn>=0.30"]
 llm = ["anthropic>=2.0"]
 bigquery = ["google-cloud-bigquery>=3.25"]
+github-app = ["PyJWT[crypto]>=2.8"]
 
 [project.scripts]
 pmcursor = "pmcursor.cli:main"
@@ -43,6 +44,12 @@ ignore_missing_imports = true
 # `google-cloud-bigquery` is an optional extra ([project.optional-dependencies]
 # bigquery); not installed in base/CI environments.
 module = ["google", "google.cloud", "google.cloud.*"]
+ignore_missing_imports = true
+
+[[tool.mypy.overrides]]
+# `PyJWT` is an optional extra ([project.optional-dependencies] github-app);
+# not installed in base/CI environments.
+module = "jwt"
 ignore_missing_imports = true
 
 [tool.ruff]
