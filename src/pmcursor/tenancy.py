@@ -204,11 +204,15 @@ class OrgRegistry:
                     return True
             return False
 
-    def resolve_key(self, token: str) -> str | None:
+    def resolve_key(
+        self, token: str, *, record_use: bool = True
+    ) -> str | None:
         """Resolve a presented ``pmk_`` key to its org id, or None.
 
         Revoked keys never resolve. On success the key's ``last_used_at`` is
-        stamped — the metering hook the SaaS layer builds on.
+        stamped — the metering hook the SaaS layer builds on. Pass
+        ``record_use=False`` for read-only lookups (e.g. rate-limit bucketing)
+        that must not write the store.
         """
         parsed = _parse_key(token.strip())
         if parsed is None:
@@ -221,14 +225,17 @@ class OrgRegistry:
                     if key.key_id != key_id or key.revoked:
                         continue
                     if hmac.compare_digest(key.key_hash, presented_hash):
-                        keys = [
-                            key.model_copy(update={"last_used_at": _utcnow()})
-                            if key.key_id == key_id
-                            else key
-                            for key in org.keys
-                        ]
-                        self._orgs[org_id] = org.model_copy(update={"keys": keys})
-                        self._save()
+                        if record_use:
+                            keys = [
+                                key.model_copy(update={"last_used_at": _utcnow()})
+                                if key.key_id == key_id
+                                else key
+                                for key in org.keys
+                            ]
+                            self._orgs[org_id] = org.model_copy(
+                                update={"keys": keys}
+                            )
+                            self._save()
                         return org_id
             return None
 

@@ -6,6 +6,7 @@ All notable changes to PMCursor are documented in this file.
 
 ### Added
 
+- Added per-tenant isolation (ADR-007): org keys get `403` on deployment-level endpoints (`POST /v1/cache/clear`, `/v1/github-app/*`); rate limits bucket per-tenant (`org:<org_id>`) with an IP fallback; the repository index cache is namespaced per org so tenants never share cached `RepoMap`s.
 - Added the team-tenancy foundation in `src/pmcursor/tenancy.py` (ADR-006): an `OrgRegistry` persisting organizations and `pmk_` API keys to a JSON store (`PMCURSOR_ORG_STORE`, CLI default `.pmcursor/orgs.json`). Keys are shown once and stored as SHA-256 hashes; `resolve_key` authenticates with constant-time comparison and stamps `last_used_at`. The API accepts org keys as bearer credentials alongside `PMCURSOR_API_TOKEN` and binds the resolved `org_id`; `GET /v1/whoami` reports which credential resolved. `pmcursor orgs create|list|issue-key|revoke-key` manages the registry.
 
 ## [0.2.0] - 2026-11-28

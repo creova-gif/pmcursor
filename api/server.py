@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import hmac
 import importlib
 import json
@@ -198,6 +199,27 @@ def _require_auth(
     if resolved_token or org_registry is not None:
         raise HTTPException(status_code=401, detail="Unauthorized")
     return None
+
+
+def _require_admin(
+    api_token: str | None,
+    authorization: str,
+    x_pmcursor_token: str,
+    org_registry: OrgRegistry | None = None,
+) -> None:
+    """Like _require_auth but rejects organization API keys.
+
+    Deployment-level endpoints (cache management, GitHub App credential
+    minting) are admin-only: an org key authenticates but gets 403 here.
+    """
+    org_id = _require_auth(
+        api_token, authorization, x_pmcursor_token, org_registry
+    )
+    if org_id is not None:
+        raise HTTPException(
+            status_code=403,
+            detail="Organization API keys cannot access this endpoint",
+        )
 
 
 def _resolve_allowed_repo_root(
@@ -515,10 +537,23 @@ def create_app(
         is_probe = request.method == "GET" and request.url.path in {"/health", "/readyz"}
         rate_limited = False
         if rate_limiter is not None and not is_probe:
-            client_ip = _extract_client_ip(
-                request, trust_proxy=effective_trust_proxy
-            )
-            if not rate_limiter.allow(client_ip):
+            bucket_key: str | None = None
+            if org_registry is not None:
+                presented = _presented_token(
+                    request.headers.get("authorization", ""),
+                    request.headers.get("x-pmcursor-token", ""),
+                )
+                if presented:
+                    resolved_org = await asyncio.to_thread(
+                        org_registry.resolve_key, presented, record_use=False
+                    )
+                    if resolved_org is not None:
+                        bucket_key = f"org:{resolved_org}"
+            if bucket_key is None:
+                bucket_key = "ip:" + _extract_client_ip(
+                    request, trust_proxy=effective_trust_proxy
+                )
+            if not rate_limiter.allow(bucket_key):
                 rate_limited = True
 
         if rate_limited:
@@ -647,7 +682,7 @@ def create_app(
         authorization: str = Header(default="", alias="Authorization"),
         x_pmcursor_token: str = Header(default="", alias="X-PMCursor-Token"),
     ) -> dict[str, Any]:
-        _require_auth(api_token, authorization, x_pmcursor_token, org_registry)
+        _require_admin(api_token, authorization, x_pmcursor_token, org_registry)
         cleared = cache.size
         cache.clear()
         return {"status": "cleared", "cleared_entries": cleared}
@@ -658,9 +693,9 @@ def create_app(
         authorization: str = Header(default="", alias="Authorization"),
         x_pmcursor_token: str = Header(default="", alias="X-PMCursor-Token"),
     ) -> RepoMap:
-        _require_auth(api_token, authorization, x_pmcursor_token, org_registry)
+        org_id = _require_auth(api_token, authorization, x_pmcursor_token, org_registry)
         repo_path = _resolve_allowed_repo_root(body.repo_root, allowed_workspace_root)
-        return cache.get_or_index(repo_path)
+        return cache.get_or_index(repo_path, scope=org_id or "")
 
     @fastapi_app.post("/v1/drift/audit")
     def drift_audit(
@@ -668,9 +703,9 @@ def create_app(
         authorization: str = Header(default="", alias="Authorization"),
         x_pmcursor_token: str = Header(default="", alias="X-PMCursor-Token"),
     ) -> DriftReport:
-        _require_auth(api_token, authorization, x_pmcursor_token, org_registry)
+        org_id = _require_auth(api_token, authorization, x_pmcursor_token, org_registry)
         repo_path = _resolve_allowed_repo_root(body.repo_root, allowed_workspace_root)
-        repo_map = cache.get_or_index(repo_path)
+        repo_map = cache.get_or_index(repo_path, scope=org_id or "")
         return check_spec_drift(
             body.prd_markdown,
             repo_map,
@@ -684,9 +719,9 @@ def create_app(
         authorization: str = Header(default="", alias="Authorization"),
         x_pmcursor_token: str = Header(default="", alias="X-PMCursor-Token"),
     ) -> PMDriftSummary:
-        _require_auth(api_token, authorization, x_pmcursor_token, org_registry)
+        org_id = _require_auth(api_token, authorization, x_pmcursor_token, org_registry)
         repo_path = _resolve_allowed_repo_root(body.repo_root, allowed_workspace_root)
-        repo_map = cache.get_or_index(repo_path)
+        repo_map = cache.get_or_index(repo_path, scope=org_id or "")
         report = check_spec_drift(
             body.prd_markdown,
             repo_map,
@@ -702,9 +737,9 @@ def create_app(
         authorization: str = Header(default="", alias="Authorization"),
         x_pmcursor_token: str = Header(default="", alias="X-PMCursor-Token"),
     ) -> TicketSyncReport:
-        _require_auth(api_token, authorization, x_pmcursor_token, org_registry)
+        org_id = _require_auth(api_token, authorization, x_pmcursor_token, org_registry)
         repo_path = _resolve_allowed_repo_root(body.repo_root, allowed_workspace_root)
-        repo_map = cache.get_or_index(repo_path)
+        repo_map = cache.get_or_index(repo_path, scope=org_id or "")
         return audit_ticket_against_repo(
             body.ticket_id,
             body.title,
@@ -720,9 +755,9 @@ def create_app(
         authorization: str = Header(default="", alias="Authorization"),
         x_pmcursor_token: str = Header(default="", alias="X-PMCursor-Token"),
     ) -> EdgeCaseChecklist:
-        _require_auth(api_token, authorization, x_pmcursor_token, org_registry)
+        org_id = _require_auth(api_token, authorization, x_pmcursor_token, org_registry)
         repo_path = _resolve_allowed_repo_root(body.repo_root, allowed_workspace_root)
-        repo_map = cache.get_or_index(repo_path)
+        repo_map = cache.get_or_index(repo_path, scope=org_id or "")
         return generate_edge_case_checklist(
             repo_map,
             prd_markdown=body.prd_markdown,
@@ -735,9 +770,9 @@ def create_app(
         authorization: str = Header(default="", alias="Authorization"),
         x_pmcursor_token: str = Header(default="", alias="X-PMCursor-Token"),
     ) -> HTMLResponse:
-        _require_auth(api_token, authorization, x_pmcursor_token, org_registry)
+        org_id = _require_auth(api_token, authorization, x_pmcursor_token, org_registry)
         repo_path = _resolve_allowed_repo_root(body.repo_root, allowed_workspace_root)
-        repo_map = cache.get_or_index(repo_path)
+        repo_map = cache.get_or_index(repo_path, scope=org_id or "")
         report = check_spec_drift(
             body.prd_markdown,
             repo_map,
@@ -753,9 +788,9 @@ def create_app(
         authorization: str = Header(default="", alias="Authorization"),
         x_pmcursor_token: str = Header(default="", alias="X-PMCursor-Token"),
     ) -> ReleaseNotesReport:
-        _require_auth(api_token, authorization, x_pmcursor_token, org_registry)
+        org_id = _require_auth(api_token, authorization, x_pmcursor_token, org_registry)
         repo_path = _resolve_allowed_repo_root(body.repo_root, allowed_workspace_root)
-        repo_map = cache.get_or_index(repo_path)
+        repo_map = cache.get_or_index(repo_path, scope=org_id or "")
         return generate_release_notes_and_coverage(
             body.prd_markdown,
             body.diff_text,
@@ -781,14 +816,14 @@ def create_app(
         authorization: str = Header(default="", alias="Authorization"),
         x_pmcursor_token: str = Header(default="", alias="X-PMCursor-Token"),
     ) -> TelemetryVerificationReport:
-        _require_auth(api_token, authorization, x_pmcursor_token, org_registry)
+        org_id = _require_auth(api_token, authorization, x_pmcursor_token, org_registry)
         if (body.events is None) == (body.source is None):
             raise HTTPException(
                 status_code=422,
                 detail="Provide exactly one of 'events' or 'source'.",
             )
         repo_path = _resolve_allowed_repo_root(body.repo_root, allowed_workspace_root)
-        repo_map = cache.get_or_index(repo_path)
+        repo_map = cache.get_or_index(repo_path, scope=org_id or "")
         if body.source is not None:
             try:
                 fetched = fetch_telemetry_events(body.source, limit=body.limit)
@@ -808,7 +843,7 @@ def create_app(
         authorization: str = Header(default="", alias="Authorization"),
         x_pmcursor_token: str = Header(default="", alias="X-PMCursor-Token"),
     ) -> dict[str, Any]:
-        _require_auth(api_token, authorization, x_pmcursor_token, org_registry)
+        _require_admin(api_token, authorization, x_pmcursor_token, org_registry)
         if not webhook_url.strip():
             raise HTTPException(
                 status_code=422, detail="webhook_url is required"
@@ -832,7 +867,7 @@ def create_app(
         authorization: str = Header(default="", alias="Authorization"),
         x_pmcursor_token: str = Header(default="", alias="X-PMCursor-Token"),
     ) -> GitHubAppCredentials:
-        _require_auth(api_token, authorization, x_pmcursor_token, org_registry)
+        _require_admin(api_token, authorization, x_pmcursor_token, org_registry)
         try:
             return exchange_manifest_code(body.code)
         except GitHubAppError as exc:
@@ -847,7 +882,7 @@ def create_app(
         authorization: str = Header(default="", alias="Authorization"),
         x_pmcursor_token: str = Header(default="", alias="X-PMCursor-Token"),
     ) -> GitHubInstallationToken:
-        _require_auth(api_token, authorization, x_pmcursor_token, org_registry)
+        _require_admin(api_token, authorization, x_pmcursor_token, org_registry)
         if effective_github_app is None:
             raise HTTPException(
                 status_code=503,
@@ -868,7 +903,7 @@ def create_app(
         authorization: str = Header(default="", alias="Authorization"),
         x_pmcursor_token: str = Header(default="", alias="X-PMCursor-Token"),
     ) -> OrgDashboardSummary:
-        _require_auth(api_token, authorization, x_pmcursor_token, org_registry)
+        org_id = _require_auth(api_token, authorization, x_pmcursor_token, org_registry)
         repo_path = _resolve_allowed_repo_root(repo_root, allowed_workspace_root)
         prd_file = (repo_path / prd_path).resolve()
         prd_markdown = (
@@ -876,7 +911,7 @@ def create_app(
             if prd_file.is_relative_to(repo_path) and prd_file.is_file()
             else ""
         )
-        repo_map = cache.get_or_index(repo_path)
+        repo_map = cache.get_or_index(repo_path, scope=org_id or "")
         flags = extract_feature_flags(repo_path)
         drift_report = check_spec_drift(
             prd_markdown,

@@ -199,3 +199,88 @@ def test_cli_orgs_lifecycle(tmp_path: Path, capsys: pytest.CaptureFixture[str]) 
         == 0
     )
     assert OrgRegistry(store).resolve_key(api_key) is None
+
+
+def test_peek_resolve_does_not_stamp(tmp_path: Path) -> None:
+    registry = _registry(tmp_path)
+    _, api_key = registry.create_org("Acme", org_id="acme")
+    assert registry.resolve_key(api_key, record_use=False) == "acme"
+    org = registry.get_org("acme")
+    assert org is not None
+    assert org.keys[0].last_used_at is None
+
+
+def test_org_key_denied_on_admin_endpoints(tmp_path: Path) -> None:
+    registry = _registry(tmp_path)
+    _, api_key = registry.create_org("Acme", org_id="acme")
+    client = TestClient(create_app(org_registry=registry))
+    headers = {"Authorization": f"Bearer {api_key}"}
+
+    resp = client.post("/v1/cache/clear", headers=headers)
+    assert resp.status_code == 403
+
+    resp = client.get(
+        "/v1/github-app/manifest",
+        params={"webhook_url": "https://x.example.com/hook"},
+        headers=headers,
+    )
+    assert resp.status_code == 403
+
+    resp = client.post(
+        "/v1/github-app/installations/123/token", headers=headers
+    )
+    assert resp.status_code == 403
+
+
+def test_admin_token_still_reaches_admin_endpoints(tmp_path: Path) -> None:
+    registry = _registry(tmp_path)
+    _, api_key = registry.create_org("Acme", org_id="acme")
+    client = TestClient(create_app(api_token="admintoken", org_registry=registry))
+    headers = {"Authorization": "Bearer admintoken"}
+    resp = client.post("/v1/cache/clear", headers=headers)
+    assert resp.status_code == 200
+    # Org key on the same deployment is still 403'd on the admin route.
+    denied = client.post(
+        "/v1/cache/clear", headers={"Authorization": f"Bearer {api_key}"}
+    )
+    assert denied.status_code == 403
+
+
+def test_org_scoped_index_cache(tmp_path: Path) -> None:
+    registry = _registry(tmp_path)
+    _, key_a = registry.create_org("Acme", org_id="acme")
+    _, key_b = registry.create_org("Beta", org_id="beta")
+    from pmcursor.mcp_server import RepoIndexCache
+
+    cache = RepoIndexCache()
+    client = TestClient(
+        create_app(org_registry=registry, repo_cache=cache)
+    )
+    body = {"repo_root": "."}
+    client.post("/v1/index", json=body, headers={"Authorization": f"Bearer {key_a}"})
+    client.post("/v1/index", json=body, headers={"Authorization": f"Bearer {key_a}"})
+    assert cache.size == 1
+    client.post("/v1/index", json=body, headers={"Authorization": f"Bearer {key_b}"})
+    assert cache.size == 2
+
+
+def test_org_scoped_rate_limit_bucket(tmp_path: Path) -> None:
+    registry = _registry(tmp_path)
+    _, key_a = registry.create_org("Acme", org_id="acme")
+    _, key_b = registry.create_org("Beta", org_id="beta")
+    client = TestClient(
+        create_app(org_registry=registry, rate_limit_per_minute=1)
+    )
+    first = client.get(
+        "/v1/whoami", headers={"Authorization": f"Bearer {key_a}"}
+    )
+    second = client.get(
+        "/v1/whoami", headers={"Authorization": f"Bearer {key_a}"}
+    )
+    assert first.status_code == 200
+    assert second.status_code == 429
+    # Org B has its own bucket — not starved by org A's limit.
+    other = client.get(
+        "/v1/whoami", headers={"Authorization": f"Bearer {key_b}"}
+    )
+    assert other.status_code == 200
