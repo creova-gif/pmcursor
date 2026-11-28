@@ -177,7 +177,7 @@ def test_langfuse_non_json_response_raises(monkeypatch: pytest.MonkeyPatch) -> N
 
 def test_fetch_telemetry_events_unknown_source() -> None:
     with pytest.raises(ConnectorFetchError, match="Unsupported telemetry source"):
-        fetch_telemetry_events("datadog")  # type: ignore[arg-type]
+        fetch_telemetry_events("datadog")
 
 
 def test_fetch_telemetry_events_warns_on_empty(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -271,7 +271,7 @@ def test_bigquery_query_failure_wrapped(monkeypatch: pytest.MonkeyPatch) -> None
     _install_fake_bigquery(monkeypatch, [])
     connector = BigQueryConnector(project="my-proj", dataset="ds", table="tbl")
 
-    import google.cloud.bigquery as bq  # type: ignore[import-not-found]
+    import google.cloud.bigquery as bq
 
     class _BoomClient:
         def __init__(self, project: str) -> None:
