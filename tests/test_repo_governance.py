@@ -53,11 +53,11 @@ def test_security_workflow_has_expected_triggers_and_scanners() -> None:
     assert re.search(r"^\s+security-scan:\s*$", content, re.MULTILINE)
     assert "runs-on: ubuntu-latest" in content
     assert "contents: read" in content
-    assert re.search(r"actions/checkout@v\d+", content)
+    assert re.search(r"actions/checkout@[0-9a-f]{40} # v\d+", content)
     assert "fetch-depth: 0" in content
-    assert re.search(r"gitleaks/gitleaks-action@v\d+", content)
+    assert re.search(r"gitleaks/gitleaks-action@[0-9a-f]{40} # v\d+", content)
     assert "${{ secrets.GITHUB_TOKEN }}" in content
-    assert re.search(r"actions/setup-python@v\d+", content)
+    assert re.search(r"actions/setup-python@[0-9a-f]{40} # v\d+", content)
     assert 'python-version: "3.12"' in content
     assert "ruff check --select S src indexer api web" in content
     assert "pip-audit" in content
