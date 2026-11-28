@@ -31,7 +31,7 @@ def test_plugin_manifests_are_valid() -> None:
     result = validate_plugin_manifests(REPO_ROOT)
     assert result.valid is True, f"Plugin validation errors: {result.errors}"
     assert result.plugin_name == "pmcursor"
-    assert result.version == "0.2.0"
+    assert result.version == "0.3.0"
     assert "skills/pm-office-hours/SKILL.md" in result.checked_components
     assert "skills/pm-spec/SKILL.md" in result.checked_components
     assert "skills/pm-drift/SKILL.md" in result.checked_components

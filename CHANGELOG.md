@@ -2,7 +2,7 @@
 
 All notable changes to PMCursor are documented in this file.
 
-## [Unreleased]
+## [0.3.0] - 2026-11-28
 
 ### Added
 
