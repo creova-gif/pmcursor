@@ -195,7 +195,7 @@ def test_mcp_server_protocol_and_tools_over_stdio(tmp_path: Path) -> None:
     init_res = responses[1]["result"]
     assert init_res["protocolVersion"] == "2024-11-05"
     assert init_res["capabilities"] == {"tools": {}}
-    assert init_res["serverInfo"] == {"name": "pmcursor", "version": "0.1.0"}
+    assert init_res["serverInfo"] == {"name": "pmcursor", "version": "0.2.0"}
 
     assert responses[2]["result"] == {}
 

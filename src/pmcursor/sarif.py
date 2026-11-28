@@ -11,7 +11,7 @@ SARIF_SCHEMA_URL = (
 SARIF_VERSION = "2.1.0"
 TOOL_NAME = "PMCursor"
 TOOL_INFORMATION_URI = "https://github.com/creova-gif/pmcursor"
-TOOL_VERSION = "0.1.0"
+TOOL_VERSION = "0.2.0"
 
 _SEVERITY_TO_SARIF_LEVEL: dict[SeverityLevel, str] = {
     "critical": "error",

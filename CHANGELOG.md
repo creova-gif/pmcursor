@@ -4,6 +4,8 @@ All notable changes to PMCursor are documented in this file.
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-11-28
+
 ### Added
 
 - Deepened GitHub App PR automation (ADR-005): merge-queue support via `merge_group` `checks_requested` events, check-run reruns via `check_run` `rerequested` filtered by check-run name, and an upserted `<!-- pmcursor-drift -->` marker comment on the PR whenever a run fails — carrying the impact markdown and finding list (`PMCURSOR_GITHUB_APP_PR_COMMENTS=0` opts out). The app manifest now requests `merge_queues: read` and subscribes to `check_run`/`merge_group` events.
