@@ -10,7 +10,7 @@ ADR-006's file-backed `OrgRegistry` writes the entire org store on every mutatio
 `SQLiteOrgRegistry` (stdlib `sqlite3`, zero new dependencies) implements the same `OrgStore` protocol as `OrgRegistry`:
 
 - **Schema:** `orgs` / `org_keys` / `org_roots` tables; key ids are primary keys so `resolve_key` is an indexed lookup instead of a scan.
-- **Multi-writer safe:** `PRAGMA journal_mode=WAL` + `busy_timeout=5000`; every mutation runs in a single `BEGIN IMMEDIATE` transaction; the read path mirrors the in-memory lock for intra-process safety.
+- **Multi-writer safe:** `PRAGMA journal_mode=WAL` + `busy_timeout=5000`; multi-statement mutations (`create_org`) run in a single `BEGIN IMMEDIATE` transaction, single-statement mutations are autocommitted atomically, and reads take the intra-process lock.
 - **Semantics parity:** same `pmk_` issuance, `hmac.compare_digest` resolution, `last_used_at` metering, audit events (`org_created`, `org_key_issued`, `org_key_revoked`, `org_roots_updated`), same `Org`/`OrgApiKey` models, same error contract (`OrgRegistryError`). A parity test asserts both backends produce identical org state.
 - **Selection:** `PMCURSOR_ORG_BACKEND=file|sqlite` (default `file`) via `org_registry_for_path`; `pmcursor orgs --backend sqlite` for admin operations.
 - **`run_server`** only refuses `WEB_CONCURRENCY>1` for the file backend — `sqlite` is the supported multi-worker path.

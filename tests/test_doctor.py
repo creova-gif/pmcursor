@@ -115,6 +115,7 @@ def test_doctor_reports_org_store_health(
 ) -> None:
     store = tmp_path / "orgs.json"
     monkeypatch.setenv("PMCURSOR_ORG_STORE", str(store))
+    monkeypatch.setenv("PMCURSOR_ORG_BACKEND", "file")
 
     exit_code = main(["doctor", "--repo", ".", "--json"])
     assert exit_code == 0

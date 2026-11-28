@@ -25,9 +25,10 @@ import secrets
 import sqlite3
 import tempfile
 import threading
+import time
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Protocol
+from typing import Any, Protocol
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
@@ -390,16 +391,30 @@ class SQLiteOrgRegistry:
             raise OrgRegistryError(
                 f"org store {self._store_path} is not a regular file"
             )
-        self._store_path.parent.mkdir(parents=True, exist_ok=True)
         try:
-            self._conn = sqlite3.connect(
-                str(self._store_path), check_same_thread=False, isolation_level=None
-            )
-            with self._conn:
-                self._conn.execute("PRAGMA journal_mode=WAL")
-                self._conn.execute("PRAGMA foreign_keys=ON")
-                self._conn.execute("PRAGMA busy_timeout=5000")
-                self._conn.executescript(self._SCHEMA)
+            self._store_path.parent.mkdir(parents=True, exist_ok=True)
+        except OSError as exc:
+            raise OrgRegistryError(
+                f"org store {self._store_path} parent cannot be created: {exc}"
+            ) from exc
+        self._conn = sqlite3.connect(
+            str(self._store_path), check_same_thread=False, isolation_level=None
+        )
+        try:
+            # busy_timeout first: it must apply to journal-mode negotiation too.
+            # WAL transition can still race a concurrent fresh-store opener, so
+            # retry the short init sequence on transient lock contention.
+            for attempt in range(3):
+                try:
+                    self._conn.execute("PRAGMA busy_timeout=5000")
+                    self._conn.execute("PRAGMA journal_mode=WAL")
+                    self._conn.execute("PRAGMA foreign_keys=ON")
+                    self._conn.executescript(self._SCHEMA)
+                    break
+                except sqlite3.OperationalError as exc:
+                    if "locked" not in str(exc) or attempt == 2:
+                        raise
+                    time.sleep(0.05 * (attempt + 1))
         except sqlite3.Error as exc:
             raise OrgRegistryError(
                 f"org store {self._store_path} cannot be opened: {exc}"
@@ -409,14 +424,29 @@ class SQLiteOrgRegistry:
     def store_path(self) -> Path:
         return self._store_path
 
-    def verify(self) -> None:
-        """Probe store integrity (``PRAGMA quick_check``) without mutating."""
+    def _fetchone(self, sql: str, params: tuple[str, ...] = ()) -> Any:
         try:
-            row = self._conn.execute("PRAGMA quick_check").fetchone()
+            return self._conn.execute(sql, params).fetchone()
         except sqlite3.Error as exc:
             raise OrgRegistryError(
-                f"org store {self._store_path} is unreadable: {exc}"
+                f"org store {self._store_path} read failed: {exc}"
             ) from exc
+
+    def _fetchall(self, sql: str, params: tuple[str, ...] = ()) -> list[Any]:
+        try:
+            return list(self._conn.execute(sql, params).fetchall())
+        except sqlite3.Error as exc:
+            raise OrgRegistryError(
+                f"org store {self._store_path} read failed: {exc}"
+            ) from exc
+
+    def _rollback(self) -> None:
+        if self._conn.in_transaction:
+            self._conn.rollback()
+
+    def verify(self) -> None:
+        """Probe store integrity (``PRAGMA quick_check``) without mutating."""
+        row = self._fetchone("PRAGMA quick_check")
         if row is None or row[0] != "ok":
             raise OrgRegistryError(f"org store {self._store_path} failed integrity check")
 
@@ -431,7 +461,7 @@ class SQLiteOrgRegistry:
                 last_used_at=last_used,
                 revoked=bool(revoked),
             )
-            for key_id, key_hash, label, k_created, last_used, revoked in self._conn.execute(
+            for key_id, key_hash, label, k_created, last_used, revoked in self._fetchall(
                 "SELECT key_id, key_hash, label, created_at, last_used_at, revoked"
                 " FROM org_keys WHERE org_id = ? ORDER BY rowid",
                 (org_id,),
@@ -439,7 +469,7 @@ class SQLiteOrgRegistry:
         ]
         roots = [
             row[0]
-            for row in self._conn.execute(
+            for row in self._fetchall(
                 "SELECT root FROM org_roots WHERE org_id = ? ORDER BY rowid", (org_id,)
             )
         ]
@@ -452,9 +482,9 @@ class SQLiteOrgRegistry:
         )
 
     def _require_org(self, org_id: str) -> tuple[str, str, str]:
-        row = self._conn.execute(
+        row = self._fetchone(
             "SELECT org_id, name, created_at FROM orgs WHERE org_id = ?", (org_id,)
-        ).fetchone()
+        )
         if row is None:
             raise OrgRegistryError(f"org {org_id!r} does not exist")
         return row[0], row[1], row[2]
@@ -463,16 +493,16 @@ class SQLiteOrgRegistry:
         with self._lock:
             return [
                 self._org_from_rows(row)
-                for row in self._conn.execute(
+                for row in self._fetchall(
                     "SELECT org_id, name, created_at FROM orgs ORDER BY org_id"
                 )
             ]
 
     def get_org(self, org_id: str) -> Org | None:
         with self._lock:
-            row = self._conn.execute(
+            row = self._fetchone(
                 "SELECT org_id, name, created_at FROM orgs WHERE org_id = ?", (org_id,)
-            ).fetchone()
+            )
             return None if row is None else self._org_from_rows(row)
 
     def create_org(self, name: str, org_id: str | None = None) -> tuple[Org, str]:
@@ -494,10 +524,10 @@ class SQLiteOrgRegistry:
                 )
                 self._conn.execute("COMMIT")
             except sqlite3.IntegrityError as exc:
-                self._conn.execute("ROLLBACK")
+                self._rollback()
                 raise OrgRegistryError(f"org {resolved_id!r} already exists") from exc
             except sqlite3.Error as exc:
-                self._conn.execute("ROLLBACK")
+                self._rollback()
                 raise OrgRegistryError(f"create_org failed: {exc}") from exc
         logger.info(
             "event=org_created org_id=%s key_id=%s", resolved_id, record.key_id
@@ -583,9 +613,9 @@ class SQLiteOrgRegistry:
                 )
                 if cursor.rowcount == 0:
                     return False
-                row = self._conn.execute(
+                row = self._fetchone(
                     "SELECT org_id FROM org_keys WHERE key_id = ?", (key_id,)
-                ).fetchone()
+                )
             except sqlite3.Error as exc:
                 raise OrgRegistryError(f"revoke_key failed: {exc}") from exc
         org_id = row[0] if row else ""
@@ -608,13 +638,10 @@ class SQLiteOrgRegistry:
         key_id, secret = parsed
         presented_hash = _hash_secret(secret)
         with self._lock:
-            try:
-                row = self._conn.execute(
-                    "SELECT org_id, key_hash, revoked FROM org_keys WHERE key_id = ?",
-                    (key_id,),
-                ).fetchone()
-            except sqlite3.Error as exc:
-                raise OrgRegistryError(f"resolve_key failed: {exc}") from exc
+            row = self._fetchone(
+                "SELECT org_id, key_hash, revoked FROM org_keys WHERE key_id = ?",
+                (key_id,),
+            )
             if row is None or row[2] or not hmac.compare_digest(row[1], presented_hash):
                 return None
             if record_use:

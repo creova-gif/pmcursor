@@ -46,7 +46,7 @@ docker run -d \
 | `JIRA_API_TOKEN` | Jira API token used by `POST /v1/publish` and `pmcursor publish` to post issue comments. | Unset |
 | `WEB_CONCURRENCY` | Positive integer number of `uvicorn` worker processes — must stay `1` with the file org backend; `sqlite` permits more (rate limits remain per-worker). | `1` |
 | `PMCURSOR_ORG_STORE` | Path to the org registry store enabling `pmk_` org-key auth, per-tenant rate buckets, org cache scopes, and per-org `workspace_roots`. Point it at a writable volume — the workspace mounts read-only. | Unset (org keys disabled) |
-| `PMCURSOR_ORG_BACKEND` | Org registry backend: `file` (single-writer JSON) or `sqlite` (WAL, multi-worker/multi-process safe). | `file` |
+| `PMCURSOR_ORG_BACKEND` | Org registry backend: `file` (single-writer JSON) or `sqlite` (WAL, multi-worker/multi-process safe). Point `PMCURSOR_ORG_STORE` at a separate `.db` path when switching — an existing JSON store is not imported. | `file` |
 | `PMCURSOR_GITHUB_APP_ID` | GitHub App id enabling installation tokens + PR automation. | Unset |
 | `PMCURSOR_GITHUB_APP_PRIVATE_KEY` / `_PATH` | App private key (inline PEM or path) for JWT signing. | Unset |
 | `PMCURSOR_GITHUB_APP_AUTO_RUN` | `0` disables webhook-driven PR drift automation. | `1` |
