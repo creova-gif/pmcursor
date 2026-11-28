@@ -558,6 +558,38 @@ def test_run_server_web_concurrency_multi_worker(
     ]
 
 
+def test_run_server_multi_worker_with_org_store_refuses(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.delenv("PMCURSOR_API_TOKEN", raising=False)
+    monkeypatch.setenv("WEB_CONCURRENCY", "2")
+    monkeypatch.setenv("PMCURSOR_ORG_STORE", "/tmp/orgs.json")
+    calls = _patch_fake_uvicorn(monkeypatch)
+
+    with pytest.raises(ValueError, match="PMCURSOR_ORG_STORE"):
+        run_server(host="127.0.0.1", port=8000)
+
+    assert calls == []
+
+
+def test_run_server_multi_worker_without_org_store_warns(
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    monkeypatch.delenv("PMCURSOR_API_TOKEN", raising=False)
+    monkeypatch.setenv("WEB_CONCURRENCY", "2")
+    monkeypatch.delenv("PMCURSOR_ORG_STORE", raising=False)
+    calls = _patch_fake_uvicorn(monkeypatch)
+
+    with caplog.at_level("WARNING"):
+        run_server(host="127.0.0.1", port=8000)
+
+    assert calls == [
+        (("api.server:app",), {"host": "127.0.0.1", "port": 8000, "workers": 2})
+    ]
+    assert "per-process" in caplog.text
+
+
 def test_run_server_invalid_web_concurrency_raises(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

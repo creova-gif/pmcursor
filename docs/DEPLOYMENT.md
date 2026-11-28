@@ -23,16 +23,17 @@ docker build -t pmcursor:latest .
 
 ### Run the Container
 
-Set `PMCURSOR_API_TOKEN` for authenticated API requests and `WEB_CONCURRENCY` to control worker count:
+Set `PMCURSOR_API_TOKEN` for authenticated API requests:
 
 ```bash
 docker run -d \
   --name pmcursor \
   -p 8000:8000 \
   -e PMCURSOR_API_TOKEN="your-strong-api-token" \
-  -e WEB_CONCURRENCY=2 \
   pmcursor:latest
 ```
+
+> **Single-worker requirement:** the rate limiter, index cache, webhook deduplicator, and file-backed org registry are **per-process**. Run exactly one uvicorn worker (`WEB_CONCURRENCY=1`, the default) — more workers silently weaken rate limits and can lose org-store updates. Scale horizontally behind a load balancer only once a shared-state backend lands (see THREAT_MODEL residual risks).
 
 | Environment Variable | Description | Default |
 | --- | --- | --- |
@@ -43,7 +44,13 @@ docker run -d \
 | `GITHUB_TOKEN` | GitHub personal access token or installation token used by `POST /v1/publish` and `pmcursor publish` to post PR comments. | Unset |
 | `LINEAR_API_KEY` | Linear API key used by `POST /v1/publish` and `pmcursor publish` to post issue comments. | Unset |
 | `JIRA_API_TOKEN` | Jira API token used by `POST /v1/publish` and `pmcursor publish` to post issue comments. | Unset |
-| `WEB_CONCURRENCY` | Positive integer number of `uvicorn` worker processes. | `1` |
+| `WEB_CONCURRENCY` | Positive integer number of `uvicorn` worker processes — **must stay `1`** (per-process state). | `1` |
+| `PMCURSOR_ORG_STORE` | Path to the org registry store enabling `pmk_` org-key auth, per-tenant rate buckets, org cache scopes, and per-org `workspace_roots`. Point it at a writable volume — the workspace mounts read-only. | Unset (org keys disabled) |
+| `PMCURSOR_GITHUB_APP_ID` | GitHub App id enabling installation tokens + PR automation. | Unset |
+| `PMCURSOR_GITHUB_APP_PRIVATE_KEY` / `_PATH` | App private key (inline PEM or path) for JWT signing. | Unset |
+| `PMCURSOR_GITHUB_APP_AUTO_RUN` | `0` disables webhook-driven PR drift automation. | `1` |
+| `PMCURSOR_GITHUB_APP_PR_COMMENTS` | `0` disables failure-comment upserts on PRs. | `1` |
+| `PMCURSOR_GITHUB_API_BASE` | GitHub API base for Enterprise Server. | `https://api.github.com` |
 | `PYTHONPATH` | Configured in the image as `/app/src:/app`. | `/app/src:/app` |
 
 > **Note:** When running via `pmcursor.cli` / `api.server:run_server`, `WEB_CONCURRENCY` must be a positive integer (`>= 1`). When running `uvicorn` directly via the container entrypoint, `uvicorn` also reads `WEB_CONCURRENCY`.
@@ -84,7 +91,24 @@ readinessProbe:
 
 ---
 
-## 3. Webhook Secrets & Security Best Practices
+## 3. Team Tenancy (org keys)
+
+Set `PMCURSOR_ORG_STORE` to a writable path (in compose, `/orgs/orgs.json` on the `pmcursor-orgs` volume) to enable per-organization API keys:
+
+```bash
+python3 -m pmcursor.cli orgs create --name Acme          # prints pmk_... once
+python3 -m pmcursor.cli orgs add-root --org-id acme --root /workspace/acme-repo
+```
+
+- Org keys authenticate as `Authorization: Bearer pmk_...` alongside the admin token and get per-org rate-limit buckets and index-cache scopes.
+- An org key can only reach repos under its registered `workspace_roots` (`orgs add-root`/`remove-root`); an org with no roots gets `403` on repo-touching endpoints. Admin tokens and open local mode are unaffected.
+- Org keys get `403` on admin endpoints: `POST /v1/cache/clear`, `/v1/github-app/*`, and `GET /metrics` (Prometheus scrapers must carry the admin token).
+- `GET /v1/whoami` reports which credential resolved (`admin` / `org-key` + `org_id` / `open`).
+- Security decisions emit structured `event=` lines on the `pmcursor.audit` logger — route it to your log pipeline for auth-failure/denial alerting. Credential material is never logged.
+
+---
+
+## 4. Webhook Secrets & Security Best Practices
 
 ### Required Webhook Secrets
 
@@ -115,13 +139,14 @@ All webhook endpoints (`/v1/webhooks/github`, `/v1/webhooks/linear`, `/v1/webhoo
 
 - Configure `PMCURSOR_RATE_LIMIT_PER_MIN` to enforce per-client rate limiting (returning `429 Too Many Requests` with `Retry-After`; `/health` and `/readyz` probes are exempt).
 - Enable `PMCURSOR_TRUST_PROXY` only when running behind a trusted reverse proxy or load balancer so rate limiting resolves client IPs from `X-Forwarded-For` instead of the proxy socket address. Leave it unset when directly exposed to prevent `X-Forwarded-For` spoofing.
+- `GET /metrics` requires the admin token when auth is configured — point your Prometheus `bearer_token`/`authorization` at `PMCURSOR_API_TOKEN`.
 - Run as the non-root `pmcursor` user (configured in `Dockerfile`).
 - Terminate TLS at your ingress or load balancer; do not expose plaintext HTTP to the public internet.
 - Mount only the workspace directories you intend to audit, and avoid storing secrets in repository files.
 
 ---
 
-## 4. GitHub Code Scanning (SARIF)
+## 5. GitHub Code Scanning (SARIF)
 
 You can export drift audit findings in SARIF 2.1.0 format using `pmcursor drift --sarif` and upload the resulting file to GitHub Code Scanning:
 

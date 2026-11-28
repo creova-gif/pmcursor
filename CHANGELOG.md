@@ -2,7 +2,17 @@
 
 All notable changes to PMCursor are documented in this file.
 
+## [Unreleased]
+
+### Fixed
+
+- Rewrote `docs/THREAT_MODEL.md` to match the shipped tenancy controls (removed an aspirational "GCP Secret Manager" claim that described a non-existent control) and added residual-risk limits (single-process state, file-backed registry, log-based audit trail).
+- `run_server` now refuses `WEB_CONCURRENCY>1` when `PMCURSOR_ORG_STORE` is set (workers would clobber the file-backed registry) and warns that rate limiting, the index cache, and webhook dedup are per-process.
+- `docs/DEPLOYMENT.md` now documents the single-worker requirement (`WEB_CONCURRENCY=1`) — the previous multi-worker example would have silently weakened the per-process rate limiter and org store — plus the org-key tenancy setup, `/metrics` admin auth for scrapers, and the GitHub App env surface.
+
 ## [0.3.0] - 2026-11-28
+
+[0.3.0]: https://github.com/creova-gif/pmcursor/compare/v0.2.0...v0.3.0
 
 ### Added
 
@@ -14,6 +24,8 @@ All notable changes to PMCursor are documented in this file.
 - Added the team-tenancy foundation in `src/pmcursor/tenancy.py` (ADR-006): an `OrgRegistry` persisting organizations and `pmk_` API keys to a JSON store (`PMCURSOR_ORG_STORE`, CLI default `.pmcursor/orgs.json`). Keys are shown once and stored as SHA-256 hashes; `resolve_key` authenticates with constant-time comparison and stamps `last_used_at`. The API accepts org keys as bearer credentials alongside `PMCURSOR_API_TOKEN` and binds the resolved `org_id`; `GET /v1/whoami` reports which credential resolved. `pmcursor orgs create|list|issue-key|revoke-key` manages the registry.
 
 ## [0.2.0] - 2026-11-28
+
+[0.2.0]: https://github.com/creova-gif/pmcursor/compare/v0.1.0...v0.2.0
 
 ### Added
 
