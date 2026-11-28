@@ -108,6 +108,17 @@ MAX_REQUEST_BYTES = 2 * 1024 * 1024  # 2_097_152 bytes
 MAX_WEBHOOK_BYTES = MAX_REQUEST_BYTES
 
 logger = logging.getLogger(__name__)
+audit_logger = logging.getLogger("pmcursor.audit")
+
+
+def _audit(event: str, **fields: object) -> None:
+    """Emit a structured security-audit line on the pmcursor.audit logger.
+
+    Fields are rendered as key=value pairs. Credential material (tokens,
+    signatures, secrets) must never be passed here.
+    """
+    rendered = " ".join(f"{key}={value}" for key, value in fields.items())
+    audit_logger.warning("event=%s %s", event, rendered)
 
 
 async def _read_bounded_webhook_body(request: WebhookRequest) -> bytes:
@@ -197,6 +208,10 @@ def _require_auth(
         if org_id is not None:
             return org_id
     if resolved_token or org_registry is not None:
+        _audit(
+            "auth_failure",
+            presented=bool(_presented_token(authorization, x_pmcursor_token)),
+        )
         raise HTTPException(status_code=401, detail="Unauthorized")
     return None
 
@@ -216,6 +231,7 @@ def _require_admin(
         api_token, authorization, x_pmcursor_token, org_registry
     )
     if org_id is not None:
+        _audit("admin_denied", org_id=org_id)
         raise HTTPException(
             status_code=403,
             detail="Organization API keys cannot access this endpoint",
@@ -230,6 +246,7 @@ def _resolve_allowed_repo_root(
     if allowed_workspace_root is not None and not repo_path.is_relative_to(
         allowed_workspace_root.resolve()
     ):
+        _audit("repo_root_denied", repo_root=repo_root)
         raise HTTPException(
             status_code=403, detail="Repository root outside allowed workspace"
         )
@@ -555,6 +572,11 @@ def create_app(
                 )
             if not rate_limiter.allow(bucket_key):
                 rate_limited = True
+                _audit(
+                    "rate_limited",
+                    bucket=bucket_key.split(":", 1)[0],
+                    path=request.url.path,
+                )
 
         if rate_limited:
             response: Response = JSONResponse(
@@ -971,6 +993,7 @@ def create_app(
             else os.environ.get("PMCURSOR_WEBHOOK_SECRET", "")
         )
         if not verify_github_signature(payload_body, x_hub_signature_256, secret):
+            _audit("webhook_signature_invalid", provider="github")
             raise HTTPException(
                 status_code=401, detail="Invalid GitHub webhook signature"
             )
@@ -1088,6 +1111,7 @@ def create_app(
             else os.environ.get("PMCURSOR_LINEAR_WEBHOOK_SECRET", "")
         )
         if not verify_linear_signature(payload_body, linear_signature, secret):
+            _audit("webhook_signature_invalid", provider="linear")
             raise HTTPException(
                 status_code=401, detail="Invalid Linear webhook signature"
             )
@@ -1130,6 +1154,7 @@ def create_app(
         )
         if jira_secret:
             if not verify_jira_signature(payload_body, x_hub_signature, jira_secret):
+                _audit("webhook_signature_invalid", provider="jira")
                 raise HTTPException(
                     status_code=401, detail="Invalid Jira webhook signature"
                 )
