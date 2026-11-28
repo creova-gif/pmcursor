@@ -262,7 +262,9 @@ class RepoIndexCache:
         if max_entries < 1:
             raise ValueError("max_entries must be >= 1")
         self._max_entries = max_entries
-        self._entries: OrderedDict[Path, tuple[RepoFingerprint, RepoMap]] = OrderedDict()
+        self._entries: OrderedDict[
+            tuple[str, Path], tuple[RepoFingerprint, RepoMap]
+        ] = OrderedDict()
         self._hits = 0
         self._misses = 0
         self._lock = threading.RLock()
@@ -290,10 +292,14 @@ class RepoIndexCache:
         with self._lock:
             return self._misses
 
-    def clear(self) -> None:
-        """Remove all cached repository entries."""
+    def clear(self, scope: str | None = None) -> None:
+        """Remove cached entries — all, or only those under ``scope``."""
         with self._lock:
-            self._entries.clear()
+            if scope is None:
+                self._entries.clear()
+                return
+            for key in [k for k in self._entries if k[0] == scope]:
+                del self._entries[key]
 
     @staticmethod
     def _compute_fingerprint(repo_root: Path) -> RepoFingerprint:
@@ -317,21 +323,26 @@ class RepoIndexCache:
         records.sort(key=lambda item: item[0])
         return tuple(records)
 
-    def get_or_index(self, repo_root: Path) -> RepoMap:
-        """Return a cached RepoMap when the repo fingerprint matches, else re-index."""
+    def get_or_index(self, repo_root: Path, *, scope: str = "") -> RepoMap:
+        """Return a cached RepoMap when the repo fingerprint matches, else re-index.
+
+        ``scope`` namespaces the entry (e.g. an org id) so tenants do not share
+        cached indexes of the same path.
+        """
         resolved_root = repo_root.resolve()
+        cache_key = (scope, resolved_root)
         with self._lock:
             fingerprint = self._compute_fingerprint(resolved_root)
-            cached = self._entries.get(resolved_root)
+            cached = self._entries.get(cache_key)
             if cached is not None and cached[0] == fingerprint:
-                self._entries.move_to_end(resolved_root)
+                self._entries.move_to_end(cache_key)
                 self._hits += 1
                 return cached[1]
 
             self._misses += 1
             repo_map = index_repository(resolved_root)
-            self._entries[resolved_root] = (fingerprint, repo_map)
-            self._entries.move_to_end(resolved_root)
+            self._entries[cache_key] = (fingerprint, repo_map)
+            self._entries.move_to_end(cache_key)
             while len(self._entries) > self.max_entries:
                 self._entries.popitem(last=False)
             return repo_map
