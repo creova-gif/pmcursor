@@ -7,6 +7,7 @@ All notable changes to PMCursor are documented in this file.
 ### Fixed
 
 - Rewrote `docs/THREAT_MODEL.md` to match the shipped tenancy controls (removed an aspirational "GCP Secret Manager" claim that described a non-existent control) and added residual-risk limits (single-process state, file-backed registry, log-based audit trail).
+- `GET /readyz` now probes the org store when `PMCURSOR_ORG_STORE` is configured and returns 503 while it is unreadable; `OrgRegistry` gained `verify()` and normalizes schema-invalid stores to `OrgRegistryError`.
 - `run_server` now refuses `WEB_CONCURRENCY>1` when `PMCURSOR_ORG_STORE` is set (workers would clobber the file-backed registry) and warns that rate limiting, the index cache, and webhook dedup are per-process.
 - `docs/DEPLOYMENT.md` now documents the single-worker requirement (`WEB_CONCURRENCY=1`) — the previous multi-worker example would have silently weakened the per-process rate limiter and org store — plus the org-key tenancy setup, `/metrics` admin auth for scrapers, and the GitHub App env surface.
 

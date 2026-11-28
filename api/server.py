@@ -93,7 +93,7 @@ from pmcursor.telemetry_verify import (
     TelemetryVerificationReport,
     verify_telemetry_samples,
 )
-from pmcursor.tenancy import OrgRegistry, default_org_registry
+from pmcursor.tenancy import OrgRegistry, OrgRegistryError, default_org_registry
 from pmcursor.tickets import TicketSyncReport, audit_ticket_against_repo
 from web.canvas import render_split_pane_canvas
 
@@ -655,6 +655,14 @@ def create_app(
 
     @fastapi_app.get("/readyz")
     def readyz() -> dict[str, Any]:
+        if org_registry is not None:
+            try:
+                org_registry.verify()
+            except OrgRegistryError as exc:
+                logger.warning("readyz: org store probe failed: %s", exc)
+                raise HTTPException(
+                    status_code=503, detail="org_store_unreadable"
+                ) from exc
         return {"status": "ready", "cached_repos": cache.size}
 
     @fastapi_app.get("/v1/whoami")
