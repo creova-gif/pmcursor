@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import hmac
 import importlib
 import json
@@ -543,8 +544,8 @@ def create_app(
                     request.headers.get("x-pmcursor-token", ""),
                 )
                 if presented:
-                    resolved_org = org_registry.resolve_key(
-                        presented, record_use=False
+                    resolved_org = await asyncio.to_thread(
+                        org_registry.resolve_key, presented, record_use=False
                     )
                     if resolved_org is not None:
                         bucket_key = f"org:{resolved_org}"
