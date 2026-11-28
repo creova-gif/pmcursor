@@ -22,10 +22,12 @@ import logging
 import os
 import re
 import secrets
+import sqlite3
 import tempfile
 import threading
 from datetime import UTC, datetime
 from pathlib import Path
+from typing import Protocol
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
@@ -34,6 +36,9 @@ _KEY_ID_ALPHABET = "0123456789abcdef"
 _ORG_ID_RE = re.compile(r"^[a-z0-9][a-z0-9_-]{0,62}$")
 DEFAULT_ORG_ID = "default"
 ENV_ORG_STORE = "PMCURSOR_ORG_STORE"
+ENV_ORG_BACKEND = "PMCURSOR_ORG_BACKEND"
+BACKEND_FILE = "file"
+BACKEND_SQLITE = "sqlite"
 DEFAULT_STORE_PATH = Path(".pmcursor") / "orgs.json"
 
 
@@ -84,6 +89,56 @@ def _parse_key(token: str) -> tuple[str, str] | None:
     if not all(c in _KEY_ID_ALPHABET for c in key_id):
         return None
     return key_id, secret
+
+
+def _resolve_org_id(name: str, org_id: str | None) -> str:
+    resolved = org_id or re.sub(r"[^a-z0-9_-]+", "-", name.strip().lower()).strip("-_")
+    if not _ORG_ID_RE.match(resolved):
+        raise OrgRegistryError(
+            f"invalid org_id {resolved!r}: must match {_ORG_ID_RE.pattern}"
+        )
+    if not name.strip():
+        raise OrgRegistryError("org name must be non-empty")
+    return resolved
+
+
+def _new_key_record(label: str) -> tuple[OrgApiKey, str]:
+    key_id = secrets.token_hex(8)
+    secret = secrets.token_hex(24)
+    return (
+        OrgApiKey(
+            key_id=key_id,
+            key_hash=_hash_secret(secret),
+            label=label,
+            created_at=_utcnow(),
+        ),
+        f"{ORG_KEY_PREFIX}_{key_id}_{secret}",
+    )
+
+
+class OrgStore(Protocol):
+    """Common interface for org-registry backends (file JSON or SQLite)."""
+
+    @property
+    def store_path(self) -> Path: ...
+
+    def verify(self) -> None: ...
+
+    def list_orgs(self) -> list[Org]: ...
+
+    def get_org(self, org_id: str) -> Org | None: ...
+
+    def create_org(self, name: str, org_id: str | None = None) -> tuple[Org, str]: ...
+
+    def issue_key(self, org_id: str, label: str = "") -> str: ...
+
+    def add_workspace_root(self, org_id: str, root: str) -> Org: ...
+
+    def remove_workspace_root(self, org_id: str, root: str) -> Org: ...
+
+    def revoke_key(self, key_id: str) -> bool: ...
+
+    def resolve_key(self, token: str, *, record_use: bool = True) -> str | None: ...
 
 
 class OrgRegistry:
@@ -156,13 +211,6 @@ class OrgRegistry:
                 pass
             raise
 
-    @staticmethod
-    def _validate_org_id(org_id: str) -> None:
-        if not _ORG_ID_RE.match(org_id):
-            raise OrgRegistryError(
-                f"invalid org_id {org_id!r}: must match {_ORG_ID_RE.pattern}"
-            )
-
     def list_orgs(self) -> list[Org]:
         with self._lock:
             return sorted(self._orgs.values(), key=lambda o: o.org_id)
@@ -173,23 +221,11 @@ class OrgRegistry:
 
     def create_org(self, name: str, org_id: str | None = None) -> tuple[Org, str]:
         """Create an org and return it with its first plaintext API key."""
-        resolved_id = org_id or re.sub(
-            r"[^a-z0-9_-]+", "-", name.strip().lower()
-        ).strip("-_")
-        self._validate_org_id(resolved_id)
-        if not name.strip():
-            raise OrgRegistryError("org name must be non-empty")
+        resolved_id = _resolve_org_id(name, org_id)
         with self._lock:
             if resolved_id in self._orgs:
                 raise OrgRegistryError(f"org {resolved_id!r} already exists")
-            key_id = secrets.token_hex(8)
-            secret = secrets.token_hex(24)
-            record = OrgApiKey(
-                key_id=key_id,
-                key_hash=_hash_secret(secret),
-                label="initial",
-                created_at=_utcnow(),
-            )
+            record, plaintext = _new_key_record("initial")
             org = Org(
                 org_id=resolved_id,
                 name=name.strip(),
@@ -198,8 +234,10 @@ class OrgRegistry:
             )
             self._orgs[resolved_id] = org
             self._save()
-            logger.info("event=org_created org_id=%s key_id=%s", resolved_id, key_id)
-            return org, f"{ORG_KEY_PREFIX}_{key_id}_{secret}"
+            logger.info(
+                "event=org_created org_id=%s key_id=%s", resolved_id, record.key_id
+            )
+            return org, plaintext
 
     def issue_key(self, org_id: str, label: str = "") -> str:
         """Issue an additional API key for an org; returns plaintext once."""
@@ -207,18 +245,11 @@ class OrgRegistry:
             org = self._orgs.get(org_id)
             if org is None:
                 raise OrgRegistryError(f"org {org_id!r} does not exist")
-            key_id = secrets.token_hex(8)
-            secret = secrets.token_hex(24)
-            record = OrgApiKey(
-                key_id=key_id,
-                key_hash=_hash_secret(secret),
-                label=label,
-                created_at=_utcnow(),
-            )
+            record, plaintext = _new_key_record(label)
             self._orgs[org_id] = org.model_copy(update={"keys": [*org.keys, record]})
             self._save()
-            logger.info("event=org_key_issued org_id=%s key_id=%s", org_id, key_id)
-            return f"{ORG_KEY_PREFIX}_{key_id}_{secret}"
+            logger.info("event=org_key_issued org_id=%s key_id=%s", org_id, record.key_id)
+            return plaintext
 
     def add_workspace_root(self, org_id: str, root: str) -> Org:
         """Grant an org access to a repo root path (stored resolved)."""
@@ -320,10 +351,314 @@ class OrgRegistry:
             return None
 
 
-def default_org_registry(env: dict[str, str] | None = None) -> OrgRegistry | None:
-    """Build a registry when ``PMCURSOR_ORG_STORE`` is set, else None."""
+class SQLiteOrgRegistry:
+    """SQLite-backed registry of organizations and their API keys.
+
+    Safe for multi-writer deployments: WAL journal mode plus
+    ``PRAGMA busy_timeout`` lets several uvicorn workers (and concurrent CLI
+    invocations) share one store file, and every mutation runs in a single
+    ``BEGIN IMMEDIATE`` transaction. Unlike :class:`OrgRegistry`, key
+    resolution is an indexed lookup rather than a scan.
+    """
+
+    _SCHEMA = """
+    CREATE TABLE IF NOT EXISTS orgs(
+        org_id TEXT PRIMARY KEY,
+        name TEXT NOT NULL,
+        created_at TEXT NOT NULL
+    );
+    CREATE TABLE IF NOT EXISTS org_keys(
+        key_id TEXT PRIMARY KEY,
+        org_id TEXT NOT NULL REFERENCES orgs(org_id),
+        key_hash TEXT NOT NULL,
+        label TEXT NOT NULL DEFAULT '',
+        created_at TEXT NOT NULL,
+        last_used_at TEXT,
+        revoked INTEGER NOT NULL DEFAULT 0
+    );
+    CREATE TABLE IF NOT EXISTS org_roots(
+        org_id TEXT NOT NULL REFERENCES orgs(org_id),
+        root TEXT NOT NULL,
+        PRIMARY KEY (org_id, root)
+    );
+    """
+
+    def __init__(self, store_path: Path) -> None:
+        self._store_path = store_path
+        self._lock = threading.RLock()
+        if self._store_path.exists() and not self._store_path.is_file():
+            raise OrgRegistryError(
+                f"org store {self._store_path} is not a regular file"
+            )
+        self._store_path.parent.mkdir(parents=True, exist_ok=True)
+        try:
+            self._conn = sqlite3.connect(
+                str(self._store_path), check_same_thread=False, isolation_level=None
+            )
+            with self._conn:
+                self._conn.execute("PRAGMA journal_mode=WAL")
+                self._conn.execute("PRAGMA foreign_keys=ON")
+                self._conn.execute("PRAGMA busy_timeout=5000")
+                self._conn.executescript(self._SCHEMA)
+        except sqlite3.Error as exc:
+            raise OrgRegistryError(
+                f"org store {self._store_path} cannot be opened: {exc}"
+            ) from exc
+
+    @property
+    def store_path(self) -> Path:
+        return self._store_path
+
+    def verify(self) -> None:
+        """Probe store integrity (``PRAGMA quick_check``) without mutating."""
+        try:
+            row = self._conn.execute("PRAGMA quick_check").fetchone()
+        except sqlite3.Error as exc:
+            raise OrgRegistryError(
+                f"org store {self._store_path} is unreadable: {exc}"
+            ) from exc
+        if row is None or row[0] != "ok":
+            raise OrgRegistryError(f"org store {self._store_path} failed integrity check")
+
+    def _org_from_rows(self, org_row: tuple[str, str, str]) -> Org:
+        org_id, name, created_at = org_row
+        keys = [
+            OrgApiKey(
+                key_id=key_id,
+                key_hash=key_hash,
+                label=label,
+                created_at=k_created,
+                last_used_at=last_used,
+                revoked=bool(revoked),
+            )
+            for key_id, key_hash, label, k_created, last_used, revoked in self._conn.execute(
+                "SELECT key_id, key_hash, label, created_at, last_used_at, revoked"
+                " FROM org_keys WHERE org_id = ? ORDER BY rowid",
+                (org_id,),
+            )
+        ]
+        roots = [
+            row[0]
+            for row in self._conn.execute(
+                "SELECT root FROM org_roots WHERE org_id = ? ORDER BY rowid", (org_id,)
+            )
+        ]
+        return Org(
+            org_id=org_id,
+            name=name,
+            created_at=created_at,
+            keys=keys,
+            workspace_roots=roots,
+        )
+
+    def _require_org(self, org_id: str) -> tuple[str, str, str]:
+        row = self._conn.execute(
+            "SELECT org_id, name, created_at FROM orgs WHERE org_id = ?", (org_id,)
+        ).fetchone()
+        if row is None:
+            raise OrgRegistryError(f"org {org_id!r} does not exist")
+        return row[0], row[1], row[2]
+
+    def list_orgs(self) -> list[Org]:
+        with self._lock:
+            return [
+                self._org_from_rows(row)
+                for row in self._conn.execute(
+                    "SELECT org_id, name, created_at FROM orgs ORDER BY org_id"
+                )
+            ]
+
+    def get_org(self, org_id: str) -> Org | None:
+        with self._lock:
+            row = self._conn.execute(
+                "SELECT org_id, name, created_at FROM orgs WHERE org_id = ?", (org_id,)
+            ).fetchone()
+            return None if row is None else self._org_from_rows(row)
+
+    def create_org(self, name: str, org_id: str | None = None) -> tuple[Org, str]:
+        """Create an org and return it with its first plaintext API key."""
+        resolved_id = _resolve_org_id(name, org_id)
+        record, plaintext = _new_key_record("initial")
+        with self._lock:
+            try:
+                self._conn.execute("BEGIN IMMEDIATE")
+                self._conn.execute(
+                    "INSERT INTO orgs(org_id, name, created_at) VALUES (?, ?, ?)",
+                    (resolved_id, name.strip(), _utcnow()),
+                )
+                self._conn.execute(
+                    "INSERT INTO org_keys"
+                    "(key_id, org_id, key_hash, label, created_at)"
+                    " VALUES (?, ?, ?, ?, ?)",
+                    (record.key_id, resolved_id, record.key_hash, record.label, record.created_at),
+                )
+                self._conn.execute("COMMIT")
+            except sqlite3.IntegrityError as exc:
+                self._conn.execute("ROLLBACK")
+                raise OrgRegistryError(f"org {resolved_id!r} already exists") from exc
+            except sqlite3.Error as exc:
+                self._conn.execute("ROLLBACK")
+                raise OrgRegistryError(f"create_org failed: {exc}") from exc
+        logger.info(
+            "event=org_created org_id=%s key_id=%s", resolved_id, record.key_id
+        )
+        org = self.get_org(resolved_id)
+        if org is None:
+            raise OrgRegistryError(f"org {resolved_id!r} missing after insert")
+        return org, plaintext
+
+    def issue_key(self, org_id: str, label: str = "") -> str:
+        """Issue an additional API key for an org; returns plaintext once."""
+        record, plaintext = _new_key_record(label)
+        with self._lock:
+            self._require_org(org_id)
+            try:
+                self._conn.execute(
+                    "INSERT INTO org_keys"
+                    "(key_id, org_id, key_hash, label, created_at)"
+                    " VALUES (?, ?, ?, ?, ?)",
+                    (record.key_id, org_id, record.key_hash, record.label, record.created_at),
+                )
+            except sqlite3.Error as exc:
+                raise OrgRegistryError(f"issue_key failed: {exc}") from exc
+        logger.info("event=org_key_issued org_id=%s key_id=%s", org_id, record.key_id)
+        return plaintext
+
+    def add_workspace_root(self, org_id: str, root: str) -> Org:
+        """Grant an org access to a repo root path (stored resolved)."""
+        resolved = str(Path(root).expanduser().resolve())
+        with self._lock:
+            self._require_org(org_id)
+            try:
+                cursor = self._conn.execute(
+                    "INSERT OR IGNORE INTO org_roots(org_id, root) VALUES (?, ?)",
+                    (org_id, resolved),
+                )
+            except sqlite3.Error as exc:
+                raise OrgRegistryError(f"add_workspace_root failed: {exc}") from exc
+            if cursor.rowcount == 0:
+                org = self.get_org(org_id)
+                if org is None:
+                    raise OrgRegistryError(f"org {org_id!r} does not exist")
+                return org
+        logger.info(
+            "event=org_roots_updated org_id=%s action=add root=%s", org_id, resolved
+        )
+        org = self.get_org(org_id)
+        if org is None:
+            raise OrgRegistryError(f"org {org_id!r} does not exist")
+        return org
+
+    def remove_workspace_root(self, org_id: str, root: str) -> Org:
+        """Revoke an org's access to a repo root path."""
+        resolved = str(Path(root).expanduser().resolve())
+        with self._lock:
+            self._require_org(org_id)
+            try:
+                cursor = self._conn.execute(
+                    "DELETE FROM org_roots WHERE org_id = ? AND root = ?",
+                    (org_id, resolved),
+                )
+            except sqlite3.Error as exc:
+                raise OrgRegistryError(f"remove_workspace_root failed: {exc}") from exc
+            if cursor.rowcount == 0:
+                raise OrgRegistryError(
+                    f"org {org_id!r} has no workspace root {resolved!r}"
+                )
+        logger.info(
+            "event=org_roots_updated org_id=%s action=remove root=%s", org_id, resolved
+        )
+        org = self.get_org(org_id)
+        if org is None:
+            raise OrgRegistryError(f"org {org_id!r} does not exist")
+        return org
+
+    def revoke_key(self, key_id: str) -> bool:
+        """Revoke a key by its key id. Returns True when a key was revoked."""
+        with self._lock:
+            try:
+                cursor = self._conn.execute(
+                    "UPDATE org_keys SET revoked = 1 WHERE key_id = ? AND revoked = 0",
+                    (key_id,),
+                )
+                if cursor.rowcount == 0:
+                    return False
+                row = self._conn.execute(
+                    "SELECT org_id FROM org_keys WHERE key_id = ?", (key_id,)
+                ).fetchone()
+            except sqlite3.Error as exc:
+                raise OrgRegistryError(f"revoke_key failed: {exc}") from exc
+        org_id = row[0] if row else ""
+        logger.info("event=org_key_revoked org_id=%s key_id=%s", org_id, key_id)
+        return True
+
+    def resolve_key(
+        self, token: str, *, record_use: bool = True
+    ) -> str | None:
+        """Resolve a presented ``pmk_`` key to its org id, or None.
+
+        Revoked keys never resolve. On success the key's ``last_used_at`` is
+        stamped — the metering hook the SaaS layer builds on. Pass
+        ``record_use=False`` for read-only lookups (e.g. rate-limit bucketing)
+        that must not write the store.
+        """
+        parsed = _parse_key(token.strip())
+        if parsed is None:
+            return None
+        key_id, secret = parsed
+        presented_hash = _hash_secret(secret)
+        with self._lock:
+            try:
+                row = self._conn.execute(
+                    "SELECT org_id, key_hash, revoked FROM org_keys WHERE key_id = ?",
+                    (key_id,),
+                ).fetchone()
+            except sqlite3.Error as exc:
+                raise OrgRegistryError(f"resolve_key failed: {exc}") from exc
+            if row is None or row[2] or not hmac.compare_digest(row[1], presented_hash):
+                return None
+            if record_use:
+                try:
+                    self._conn.execute(
+                        "UPDATE org_keys SET last_used_at = ? WHERE key_id = ?",
+                        (_utcnow(), key_id),
+                    )
+                except sqlite3.Error as exc:
+                    raise OrgRegistryError(f"resolve_key failed: {exc}") from exc
+            return row[0]
+
+
+def org_registry_for_path(
+    store_path: Path, backend: str | None = None
+) -> OrgStore:
+    """Build the registry backend for a store path.
+
+    ``backend`` is ``file`` (default) or ``sqlite``; when unset it reads
+    ``PMCURSOR_ORG_BACKEND``. Unknown values raise ``OrgRegistryError``.
+    """
+    selected = (
+        backend
+        if backend is not None
+        else os.environ.get(ENV_ORG_BACKEND, BACKEND_FILE)
+    ).strip().lower()
+    if selected == BACKEND_SQLITE:
+        return SQLiteOrgRegistry(store_path)
+    if selected in {"", BACKEND_FILE}:
+        return OrgRegistry(store_path)
+    raise OrgRegistryError(
+        f"unknown {ENV_ORG_BACKEND} value {selected!r}: "
+        f"expected '{BACKEND_FILE}' or '{BACKEND_SQLITE}'"
+    )
+
+
+def default_org_registry(env: dict[str, str] | None = None) -> OrgStore | None:
+    """Build a registry when ``PMCURSOR_ORG_STORE`` is set, else None.
+
+    Backend is selected by ``PMCURSOR_ORG_BACKEND`` (``file`` default,
+    ``sqlite`` for multi-writer deployments).
+    """
     environ = env if env is not None else os.environ
     raw = environ.get(ENV_ORG_STORE, "").strip()
     if not raw:
         return None
-    return OrgRegistry(Path(raw))
+    return org_registry_for_path(Path(raw), environ.get(ENV_ORG_BACKEND, "").strip())

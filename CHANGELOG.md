@@ -6,6 +6,8 @@ All notable changes to PMCursor are documented in this file.
 
 ### Added
 
+- SQLite org-registry backend (ADR-011): `PMCURSOR_ORG_BACKEND=sqlite` gives a multi-writer-safe store (WAL + busy_timeout) so `WEB_CONCURRENCY>1` is supported with org keys — `run_server` only refuses multiple workers on the file backend now; key resolution is indexed; same `OrgStore` protocol, models, audit events, and `/readyz` probe. `pmcursor orgs --backend` selects it.
+- `pmcursor doctor` reports `github_app_configured`, `org_store_configured`, and `org_store_healthy`.
 - PyPI-ready packaging metadata in `pyproject.toml`: `readme`, SPDX `license = "MIT"`, `license-files`, author, classifiers, and project URLs; the release workflow now runs `twine check dist/*` so malformed metadata can't ship.
 
 ### Fixed

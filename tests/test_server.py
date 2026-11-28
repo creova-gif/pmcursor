@@ -572,6 +572,22 @@ def test_run_server_multi_worker_with_org_store_refuses(
     assert calls == []
 
 
+def test_run_server_multi_worker_sqlite_backend_allowed(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.delenv("PMCURSOR_API_TOKEN", raising=False)
+    monkeypatch.setenv("WEB_CONCURRENCY", "2")
+    monkeypatch.setenv("PMCURSOR_ORG_STORE", "/tmp/orgs.db")
+    monkeypatch.setenv("PMCURSOR_ORG_BACKEND", "sqlite")
+    calls = _patch_fake_uvicorn(monkeypatch)
+
+    run_server(host="127.0.0.1", port=8000)
+
+    assert calls == [
+        (("api.server:app",), {"host": "127.0.0.1", "port": 8000, "workers": 2})
+    ]
+
+
 def test_run_server_multi_worker_without_org_store_warns(
     monkeypatch: pytest.MonkeyPatch,
     caplog: pytest.LogCaptureFixture,

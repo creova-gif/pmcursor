@@ -33,7 +33,7 @@ docker run -d \
   pmcursor:latest
 ```
 
-> **Single-worker requirement:** the rate limiter, index cache, webhook deduplicator, and file-backed org registry are **per-process**. Run exactly one uvicorn worker (`WEB_CONCURRENCY=1`, the default) — more workers silently weaken rate limits and can lose org-store updates. Scale horizontally behind a load balancer only once a shared-state backend lands (see THREAT_MODEL residual risks).
+> **Worker count and per-process state:** the rate limiter, index cache, and webhook deduplicator are **per-process** — more workers proportionally weaken limits and dedup. With the default file org backend, `WEB_CONCURRENCY` must stay `1` (`run_server` refuses otherwise): worker processes would clobber the JSON store. Set `PMCURSOR_ORG_BACKEND=sqlite` for a multi-writer-safe org store — but note rate limits still apply per worker.
 
 | Environment Variable | Description | Default |
 | --- | --- | --- |
@@ -44,8 +44,9 @@ docker run -d \
 | `GITHUB_TOKEN` | GitHub personal access token or installation token used by `POST /v1/publish` and `pmcursor publish` to post PR comments. | Unset |
 | `LINEAR_API_KEY` | Linear API key used by `POST /v1/publish` and `pmcursor publish` to post issue comments. | Unset |
 | `JIRA_API_TOKEN` | Jira API token used by `POST /v1/publish` and `pmcursor publish` to post issue comments. | Unset |
-| `WEB_CONCURRENCY` | Positive integer number of `uvicorn` worker processes — **must stay `1`** (per-process state). | `1` |
+| `WEB_CONCURRENCY` | Positive integer number of `uvicorn` worker processes — must stay `1` with the file org backend; `sqlite` permits more (rate limits remain per-worker). | `1` |
 | `PMCURSOR_ORG_STORE` | Path to the org registry store enabling `pmk_` org-key auth, per-tenant rate buckets, org cache scopes, and per-org `workspace_roots`. Point it at a writable volume — the workspace mounts read-only. | Unset (org keys disabled) |
+| `PMCURSOR_ORG_BACKEND` | Org registry backend: `file` (single-writer JSON) or `sqlite` (WAL, multi-worker/multi-process safe). | `file` |
 | `PMCURSOR_GITHUB_APP_ID` | GitHub App id enabling installation tokens + PR automation. | Unset |
 | `PMCURSOR_GITHUB_APP_PRIVATE_KEY` / `_PATH` | App private key (inline PEM or path) for JWT signing. | Unset |
 | `PMCURSOR_GITHUB_APP_AUTO_RUN` | `0` disables webhook-driven PR drift automation. | `1` |
