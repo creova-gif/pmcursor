@@ -13,7 +13,7 @@ When `PMCURSOR_API_TOKEN` is configured, protected `/v1/*` endpoints require a v
 
 When `PMCURSOR_ORG_STORE` is configured (or `create_app(org_registry=...)`), per-organization API keys (`pmk_...`, issued via `pmcursor orgs`) authenticate the same way — either header — and bind the resolved `org_id` to the request. `GET /v1/whoami` reports which credential resolved (`admin`, `org-key`, or `open`). Org keys are stored as SHA-256 hashes; `pmcursor orgs` prints the plaintext once at issue time.
 
-Org keys get `403 Forbidden` on deployment-level endpoints (`POST /v1/cache/clear`, all `/v1/github-app/*` routes) — those are admin-only. Rate limits bucket per-tenant (`org:<org_id>`) when an org key resolves, otherwise per-IP; the repository index cache is likewise namespaced per org.
+Org keys get `403 Forbidden` on deployment-level endpoints (`POST /v1/cache/clear`, all `/v1/github-app/*` routes) — those are admin-only. Rate limits bucket per-tenant (`org:<org_id>`) when an org key resolves, otherwise per-IP; the repository index cache is likewise namespaced per org, and repo access is limited to admin-registered `workspace_roots` (`pmcursor orgs add-root`; an org with no roots gets `403` on repo-touching endpoints).
 
 ### Webhook HMAC Signatures
 

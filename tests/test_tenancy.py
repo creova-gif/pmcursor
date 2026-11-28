@@ -250,6 +250,8 @@ def test_org_scoped_index_cache(tmp_path: Path) -> None:
     registry = _registry(tmp_path)
     _, key_a = registry.create_org("Acme", org_id="acme")
     _, key_b = registry.create_org("Beta", org_id="beta")
+    registry.add_workspace_root("acme", ".")
+    registry.add_workspace_root("beta", ".")
     from pmcursor.mcp_server import RepoIndexCache
 
     cache = RepoIndexCache()
@@ -372,3 +374,66 @@ def test_audit_rate_limited_event(
         client.get("/v1/whoami", headers={"Authorization": f"Bearer {api_key}"})
     assert "event=rate_limited" in caplog.text
     assert "bucket=org" in caplog.text
+
+
+def test_org_workspace_roots_gate_repo_access(tmp_path: Path) -> None:
+    registry = _registry(tmp_path)
+    _, api_key = registry.create_org("Acme", org_id="acme")
+    allowed = tmp_path / "acme-repo"
+    allowed.mkdir()
+    (allowed / "x.py").write_text("def f() -> int:\n    return 1\n")
+    registry.add_workspace_root("acme", str(allowed))
+    client = TestClient(create_app(org_registry=registry))
+
+    headers = {"Authorization": f"Bearer {api_key}"}
+    ok = client.post(
+        "/v1/index", json={"repo_root": str(allowed)}, headers=headers
+    )
+    assert ok.status_code == 200
+    # A path outside the registered roots is denied — even though the org
+    # key is valid and the directory exists.
+    outside = tmp_path / "other-repo"
+    outside.mkdir()
+    denied = client.post(
+        "/v1/index", json={"repo_root": str(outside)}, headers=headers
+    )
+    assert denied.status_code == 403
+    assert "org workspace" in denied.json()["detail"]
+
+
+def test_org_without_roots_cannot_index_any_repo(tmp_path: Path) -> None:
+    registry = _registry(tmp_path)
+    _, api_key = registry.create_org("Acme", org_id="acme")
+    client = TestClient(create_app(org_registry=registry))
+    denied = client.post(
+        "/v1/index",
+        json={"repo_root": "."},
+        headers={"Authorization": f"Bearer {api_key}"},
+    )
+    assert denied.status_code == 403
+
+
+def test_remove_workspace_root_restores_denial(tmp_path: Path) -> None:
+    registry = _registry(tmp_path)
+    _, api_key = registry.create_org("Acme", org_id="acme")
+    registry.add_workspace_root("acme", ".")
+    client = TestClient(create_app(org_registry=registry))
+    headers = {"Authorization": f"Bearer {api_key}"}
+    ok = client.post("/v1/index", json={"repo_root": "."}, headers=headers)
+    assert ok.status_code == 200
+    registry.remove_workspace_root("acme", ".")
+    denied = client.post("/v1/index", json={"repo_root": "."}, headers=headers)
+    assert denied.status_code == 403
+
+
+def test_admin_token_bypasses_org_roots(tmp_path: Path) -> None:
+    registry = _registry(tmp_path)
+    client = TestClient(
+        create_app(api_token="admintoken", org_registry=registry)
+    )
+    resp = client.post(
+        "/v1/index",
+        json={"repo_root": "."},
+        headers={"Authorization": "Bearer admintoken"},
+    )
+    assert resp.status_code == 200

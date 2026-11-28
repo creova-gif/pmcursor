@@ -62,6 +62,10 @@ class Org(BaseModel):
     name: str
     created_at: str
     keys: list[OrgApiKey] = Field(default_factory=list)
+    # Absolute repo-root paths this org may index/audit. An org key with an
+    # empty list can authenticate but cannot reach any repository — roots are
+    # a least-privilege grant registered by the deployment admin.
+    workspace_roots: list[str] = Field(default_factory=list)
 
 
 def _utcnow() -> str:
@@ -193,6 +197,49 @@ class OrgRegistry:
             self._save()
             logger.info("event=org_key_issued org_id=%s key_id=%s", org_id, key_id)
             return f"{ORG_KEY_PREFIX}_{key_id}_{secret}"
+
+    def add_workspace_root(self, org_id: str, root: str) -> Org:
+        """Grant an org access to a repo root path (stored resolved)."""
+        resolved = str(Path(root).expanduser().resolve())
+        with self._lock:
+            org = self._orgs.get(org_id)
+            if org is None:
+                raise OrgRegistryError(f"org {org_id!r} does not exist")
+            if resolved in org.workspace_roots:
+                return org
+            updated = org.model_copy(
+                update={"workspace_roots": [*org.workspace_roots, resolved]}
+            )
+            self._orgs[org_id] = updated
+            self._save()
+            logger.info(
+                "event=org_roots_updated org_id=%s action=add root=%s",
+                org_id,
+                resolved,
+            )
+            return updated
+
+    def remove_workspace_root(self, org_id: str, root: str) -> Org:
+        """Revoke an org's access to a repo root path."""
+        resolved = str(Path(root).expanduser().resolve())
+        with self._lock:
+            org = self._orgs.get(org_id)
+            if org is None:
+                raise OrgRegistryError(f"org {org_id!r} does not exist")
+            remaining = [r for r in org.workspace_roots if r != resolved]
+            if remaining == list(org.workspace_roots):
+                raise OrgRegistryError(
+                    f"org {org_id!r} has no workspace root {resolved!r}"
+                )
+            updated = org.model_copy(update={"workspace_roots": remaining})
+            self._orgs[org_id] = updated
+            self._save()
+            logger.info(
+                "event=org_roots_updated org_id=%s action=remove root=%s",
+                org_id,
+                resolved,
+            )
+            return updated
 
     def revoke_key(self, key_id: str) -> bool:
         """Revoke a key by its key id. Returns True when a key was revoked."""
