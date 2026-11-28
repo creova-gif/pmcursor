@@ -3,6 +3,7 @@ from __future__ import annotations
 import base64
 import json
 import logging
+import re
 import tarfile
 import tempfile
 import urllib.error
@@ -31,6 +32,7 @@ _FINDINGS_LIMIT = 25
 PR_AUTOMATION_ACTIONS: frozenset[str] = frozenset(
     {"opened", "synchronize", "reopened", "ready_for_review"}
 )
+DEFAULT_CHECK_RUN_NAME = "pmcursor-drift"
 DEFAULT_PRD_CANDIDATES: tuple[str, ...] = (
     "PROJECT_SPEC.md",
     "PRD.md",
@@ -244,6 +246,48 @@ class GitHubRepoClient:
             },
         )
 
+    def upsert_marker_comment(
+        self,
+        repo_full_name: str,
+        issue_number: int,
+        *,
+        marker: str,
+        body: str,
+    ) -> None:
+        """Create or update the bot's marker comment on an issue/PR."""
+        url = (
+            f"{self._api_base}/repos/{repo_full_name}"
+            f"/issues/{issue_number}/comments?per_page=100"
+        )
+        raw = self._open(url, accept="application/vnd.github+json")
+        comments = json.loads(raw)
+        if isinstance(comments, list):
+            for comment in comments:
+                if not isinstance(comment, dict):
+                    continue
+                existing = comment.get("body")
+                comment_id = comment.get("id")
+                if (
+                    isinstance(existing, str)
+                    and existing.startswith(marker)
+                    and isinstance(comment_id, int)
+                ):
+                    self._open(
+                        f"{self._api_base}/repos/{repo_full_name}"
+                        f"/issues/comments/{comment_id}",
+                        accept="application/vnd.github+json",
+                        method="PATCH",
+                        body={"body": body},
+                    )
+                    return
+        self._open(
+            f"{self._api_base}/repos/{repo_full_name}"
+            f"/issues/{issue_number}/comments",
+            accept="application/vnd.github+json",
+            method="POST",
+            body={"body": body},
+        )
+
 
 def _extract_tarball(
     tarball_path: Path,
@@ -316,38 +360,56 @@ def check_run_conclusion(report: DriftReport) -> str:
     return "neutral"
 
 
-def process_pull_request_event(
-    payload: dict[str, Any],
-    *,
-    client: GitHubRepoClient,
-    prd_candidates: tuple[str, ...] = DEFAULT_PRD_CANDIDATES,
-    check_run_name: str = "pmcursor-drift",
-) -> PullRequestAutomationResult:
-    """Index a PR head tree, run drift vs its PRD, post a check run."""
-    repo_obj = payload.get("repository")
+_COMMENT_MARKER = "<!-- pmcursor-drift -->"
+_MERGE_GROUP_PR_RE = re.compile(r"/pr-(\d+)-[^/]+$")
+
+
+def _event_head_sha(payload: dict[str, Any]) -> str:
+    """Best-effort head sha for neutral-fallback check runs."""
+    merge_group = payload.get("merge_group")
+    if isinstance(merge_group, dict):
+        sha = merge_group.get("head_sha")
+        return sha if isinstance(sha, str) else ""
+    check_run = payload.get("check_run")
+    if isinstance(check_run, dict):
+        sha = check_run.get("head_sha")
+        return sha if isinstance(sha, str) else ""
     pr_obj = payload.get("pull_request")
-    install_obj = payload.get("installation")
-    repo_name = repo_obj.get("full_name") if isinstance(repo_obj, dict) else None
     head_obj = pr_obj.get("head") if isinstance(pr_obj, dict) else None
-    head_sha = head_obj.get("sha") if isinstance(head_obj, dict) else None
-    base_obj = pr_obj.get("base") if isinstance(pr_obj, dict) else None
-    base_sha = base_obj.get("sha") if isinstance(base_obj, dict) else None
-    pr_number = payload.get("number")
-    installation_id = (
+    sha = head_obj.get("sha") if isinstance(head_obj, dict) else ""
+    return sha if isinstance(sha, str) else ""
+
+
+def _repo_and_installation(
+    payload: dict[str, Any],
+) -> tuple[str, int]:
+    """Extract repository full_name and installation id from a payload."""
+    repo_obj = payload.get("repository")
+    repo_name = repo_obj.get("full_name") if isinstance(repo_obj, dict) else None
+    install_obj = payload.get("installation")
+    install_id = (
         install_obj.get("id") if isinstance(install_obj, dict) else None
     )
-    if not (isinstance(repo_name, str) and repo_name) or not isinstance(
-        pr_number, int
-    ):
-        raise GitHubAutomationError(
-            "pull_request payload missing repository.full_name or number"
-        )
-    if not (isinstance(head_sha, str) and head_sha):
-        raise GitHubAutomationError("pull_request payload missing head.sha")
-    if not (isinstance(base_sha, str) and base_sha):
-        raise GitHubAutomationError("pull_request payload missing base.sha")
-    if not isinstance(installation_id, int) or installation_id <= 0:
-        raise GitHubAutomationError("pull_request payload missing installation.id")
+    if not (isinstance(repo_name, str) and repo_name):
+        raise GitHubAutomationError("payload missing repository.full_name")
+    if not isinstance(install_id, int) or install_id <= 0:
+        raise GitHubAutomationError("payload missing installation.id")
+    return repo_name, install_id
+
+
+def _run_pipeline(
+    *,
+    repo_name: str,
+    head_sha: str,
+    base_sha: str,
+    pr_number: int,
+    installation_id: int,
+    client: GitHubRepoClient,
+    prd_candidates: tuple[str, ...],
+    check_run_name: str,
+    post_failure_comment: bool,
+) -> PullRequestAutomationResult:
+    """Index the head tree, compute drift vs its spec, post a check run."""
 
     def _result(
         status: Literal["completed", "skipped", "failed"],
@@ -407,6 +469,7 @@ def process_pull_request_event(
         )
         conclusion = check_run_conclusion(impact.drift_report)
         findings = len(impact.drift_report.findings)
+        findings_text = _findings_text(impact.drift_report)
         client.create_check_run(
             repo_name,
             head_sha=head_sha,
@@ -414,8 +477,27 @@ def process_pull_request_event(
             conclusion=conclusion,
             title=f"PMCursor drift — {impact.drift_report.status}",
             summary=impact.markdown_comment,
-            text=_findings_text(impact.drift_report),
+            text=findings_text,
         )
+        if conclusion == "failure" and pr_number > 0 and post_failure_comment:
+            try:
+                comment_body = (
+                    f"{_COMMENT_MARKER}\n\n{impact.markdown_comment}"
+                )
+                if findings_text:
+                    comment_body += f"\n\n{findings_text}"
+                client.upsert_marker_comment(
+                    repo_name,
+                    pr_number,
+                    marker=_COMMENT_MARKER,
+                    body=comment_body,
+                )
+            except GitHubAutomationError:
+                logger.warning(
+                    "could not post drift comment on %s#%s",
+                    repo_name,
+                    pr_number,
+                )
         return _result(
             "completed",
             conclusion,
@@ -424,20 +506,182 @@ def process_pull_request_event(
         )
 
 
+def process_pull_request_event(
+    payload: dict[str, Any],
+    *,
+    client: GitHubRepoClient,
+    prd_candidates: tuple[str, ...] = DEFAULT_PRD_CANDIDATES,
+    check_run_name: str = DEFAULT_CHECK_RUN_NAME,
+    post_failure_comment: bool = True,
+) -> PullRequestAutomationResult:
+    """Parse a pull_request event and run the drift pipeline."""
+    repo_name, installation_id = _repo_and_installation(payload)
+    pr_obj = payload.get("pull_request")
+    head_obj = pr_obj.get("head") if isinstance(pr_obj, dict) else None
+    head_sha = head_obj.get("sha") if isinstance(head_obj, dict) else None
+    base_obj = pr_obj.get("base") if isinstance(pr_obj, dict) else None
+    base_sha = base_obj.get("sha") if isinstance(base_obj, dict) else None
+    pr_number = payload.get("number")
+    if not isinstance(pr_number, int) or pr_number <= 0:
+        raise GitHubAutomationError("pull_request payload missing number")
+    if not (isinstance(head_sha, str) and head_sha):
+        raise GitHubAutomationError("pull_request payload missing head.sha")
+    if not (isinstance(base_sha, str) and base_sha):
+        raise GitHubAutomationError("pull_request payload missing base.sha")
+    return _run_pipeline(
+        repo_name=repo_name,
+        head_sha=head_sha,
+        base_sha=base_sha,
+        pr_number=pr_number,
+        installation_id=installation_id,
+        client=client,
+        prd_candidates=prd_candidates,
+        check_run_name=check_run_name,
+        post_failure_comment=post_failure_comment,
+    )
+
+
+def process_merge_group_event(
+    payload: dict[str, Any],
+    *,
+    client: GitHubRepoClient,
+    prd_candidates: tuple[str, ...] = DEFAULT_PRD_CANDIDATES,
+    check_run_name: str = DEFAULT_CHECK_RUN_NAME,
+    post_failure_comment: bool = True,
+) -> PullRequestAutomationResult:
+    """Parse a merge_group checks_requested event and run the pipeline.
+
+    The merge queue's head_ref (`refs/heads/gh-readonly-queue/<base>/pr-N-<sha>`)
+    carries the PR number, so failure comments can still be posted.
+    """
+    repo_name, installation_id = _repo_and_installation(payload)
+    mg_obj = payload.get("merge_group")
+    if not isinstance(mg_obj, dict):
+        raise GitHubAutomationError("merge_group payload missing merge_group")
+    head_sha = mg_obj.get("head_sha")
+    base_sha = mg_obj.get("base_sha")
+    head_ref = mg_obj.get("head_ref")
+    if not (isinstance(head_sha, str) and head_sha):
+        raise GitHubAutomationError("merge_group payload missing head_sha")
+    if not (isinstance(base_sha, str) and base_sha):
+        raise GitHubAutomationError("merge_group payload missing base_sha")
+    pr_number = 0
+    if isinstance(head_ref, str):
+        match = _MERGE_GROUP_PR_RE.search(head_ref)
+        if match:
+            pr_number = int(match.group(1))
+    return _run_pipeline(
+        repo_name=repo_name,
+        head_sha=head_sha,
+        base_sha=base_sha,
+        pr_number=pr_number,
+        installation_id=installation_id,
+        client=client,
+        prd_candidates=prd_candidates,
+        check_run_name=check_run_name,
+        post_failure_comment=post_failure_comment,
+    )
+
+
+def process_check_run_rerequest(
+    payload: dict[str, Any],
+    *,
+    client: GitHubRepoClient,
+    prd_candidates: tuple[str, ...] = DEFAULT_PRD_CANDIDATES,
+    check_run_name: str = DEFAULT_CHECK_RUN_NAME,
+    post_failure_comment: bool = True,
+) -> PullRequestAutomationResult | None:
+    """Re-run the pipeline for a check_run rerequested event.
+
+    Returns None when the event is not a rerun of our own check run.
+    """
+    if payload.get("action") != "rerequested":
+        return None
+    cr_obj = payload.get("check_run")
+    if not isinstance(cr_obj, dict) or cr_obj.get("name") != check_run_name:
+        return None
+    repo_name, installation_id = _repo_and_installation(payload)
+    head_sha = cr_obj.get("head_sha")
+    prs = cr_obj.get("pull_requests")
+    entry: dict[str, Any] | None = None
+    if isinstance(prs, list):
+        for item in prs:
+            if isinstance(item, dict):
+                entry = item
+                break
+    pr_number: Any = None
+    base_sha: Any = None
+    if entry is not None:
+        base_obj = entry.get("base")
+        base_sha = base_obj.get("sha") if isinstance(base_obj, dict) else None
+        pr_number = entry.get("number")
+    else:
+        # Fork-based PRs legitimately ship an empty pull_requests array;
+        # check_suite.before/after still pins the audited commit range.
+        suite = cr_obj.get("check_suite")
+        if isinstance(suite, dict):
+            base_sha = suite.get("before")
+            pr_number = 0
+    if entry is None and not (isinstance(base_sha, str) and base_sha):
+        # No PR entry and no check_suite shas — nothing to rerun against.
+        # Return silently rather than posting a confusing neutral check.
+        return None
+    if not (isinstance(head_sha, str) and head_sha):
+        raise GitHubAutomationError("check_run payload missing head_sha")
+    if not (isinstance(base_sha, str) and base_sha):
+        raise GitHubAutomationError("check_run payload missing base.sha")
+    if not isinstance(pr_number, int) or pr_number < 0:
+        raise GitHubAutomationError("check_run payload missing PR number")
+    return _run_pipeline(
+        repo_name=repo_name,
+        head_sha=head_sha,
+        base_sha=base_sha,
+        pr_number=pr_number,
+        installation_id=installation_id,
+        client=client,
+        prd_candidates=prd_candidates,
+        check_run_name=check_run_name,
+        post_failure_comment=post_failure_comment,
+    )
+
+
 def run_pull_request_automation(
     payload: dict[str, Any],
     *,
     client: GitHubRepoClient,
-    check_run_name: str = "pmcursor-drift",
+    check_run_name: str = DEFAULT_CHECK_RUN_NAME,
     prd_candidates: tuple[str, ...] = DEFAULT_PRD_CANDIDATES,
-) -> PullRequestAutomationResult:
-    """Best-effort wrapper: failures post a neutral check run, never raise."""
+    post_failure_comment: bool = True,
+) -> PullRequestAutomationResult | None:
+    """Best-effort wrapper: failures post a neutral check run, never raise.
+
+    Dispatches on event kind embedded in the payload: pull_request,
+    merge_group, or check_run rerequested (returns None for foreign
+    check runs).
+    """
     try:
+        if "merge_group" in payload:
+            return process_merge_group_event(
+                payload,
+                client=client,
+                prd_candidates=prd_candidates,
+                check_run_name=check_run_name,
+                post_failure_comment=post_failure_comment,
+            )
+        if "check_run" in payload:
+            return process_check_run_rerequest(
+                payload,
+                client=client,
+                prd_candidates=prd_candidates,
+                check_run_name=check_run_name,
+                post_failure_comment=post_failure_comment,
+            )
         return process_pull_request_event(
             payload,
             client=client,
             prd_candidates=prd_candidates,
             check_run_name=check_run_name,
+            post_failure_comment=post_failure_comment,
         )
     except GitHubAutomationError as exc:
         logger.warning("pull_request automation failed: %s", exc)
@@ -447,9 +691,7 @@ def run_pull_request_automation(
         error = GitHubAutomationError(f"automation crashed: {exc}")
     repo_obj = payload.get("repository")
     repo_name = repo_obj.get("full_name") if isinstance(repo_obj, dict) else ""
-    pr_obj = payload.get("pull_request")
-    head_obj = pr_obj.get("head") if isinstance(pr_obj, dict) else None
-    head_sha = head_obj.get("sha") if isinstance(head_obj, dict) else ""
+    head_sha = _event_head_sha(payload)
     install_obj = payload.get("installation")
     install_id = install_obj.get("id") if isinstance(install_obj, dict) else 0
     pr_number_raw = payload.get("number")
@@ -471,7 +713,7 @@ def run_pull_request_automation(
         conclusion="neutral",
         repository=repo_name if isinstance(repo_name, str) else "",
         pr_number=pr_number,
-        head_sha=head_sha if isinstance(head_sha, str) else "",
+        head_sha=head_sha,
         installation_id=install_id if isinstance(install_id, int) else 0,
         message=str(error),
     )
