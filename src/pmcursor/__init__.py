@@ -22,6 +22,14 @@ from pmcursor.feature_flags import (
 )
 from pmcursor.federation import index_federated_repos, merge_repo_maps
 from pmcursor.indexer import index_repository
+from pmcursor.llm import (
+    AnthropicLLMClient,
+    LLMClient,
+    LLMUnavailableError,
+    PMDriftSummary,
+    default_llm_client,
+    summarize_drift_report,
+)
 from pmcursor.mcp_server import (
     PMCursorMCPServer,
     RepoIndexCache,
@@ -73,6 +81,7 @@ from pmcursor.tickets import (
 
 __all__ = [
     "ADRContract",
+    "AnthropicLLMClient",
     "DriftFinding",
     "DriftReport",
     "EdgeCaseCategory",
@@ -85,9 +94,12 @@ __all__ = [
     "FieldContract",
     "FixPrdResult",
     "FlagAuditReport",
+    "LLMClient",
+    "LLMUnavailableError",
     "ModelContract",
     "ObservedTelemetryEvent",
     "PMCursorMCPServer",
+    "PMDriftSummary",
     "PRImpactItem",
     "PRImpactReport",
     "PluginValidationResult",
@@ -109,6 +121,7 @@ __all__ = [
     "audit_ticket_against_repo",
     "check_spec_drift",
     "compute_scope_coverage",
+    "default_llm_client",
     "drift_report_to_sarif",
     "extract_feature_flags",
     "fix_prd_markdown",
@@ -124,6 +137,7 @@ __all__ = [
     "publish_linear_comment",
     "run_eval_benchmark",
     "run_mcp_server",
+    "summarize_drift_report",
     "validate_plugin_manifests",
     "verify_telemetry_samples",
 ]
