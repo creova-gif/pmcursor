@@ -437,3 +437,47 @@ def test_admin_token_bypasses_org_roots(tmp_path: Path) -> None:
         headers={"Authorization": "Bearer admintoken"},
     )
     assert resp.status_code == 200
+
+
+def test_verify_passes_on_healthy_and_missing_store(tmp_path: Path) -> None:
+    registry = _registry(tmp_path)
+    registry.verify()
+    registry.create_org("Acme", org_id="acme")
+    registry.verify()
+
+
+def test_verify_raises_on_corrupt_and_schema_invalid_store(
+    tmp_path: Path,
+) -> None:
+    store = tmp_path / "orgs.json"
+    store.write_text("{not json", encoding="utf-8")
+    with pytest.raises(OrgRegistryError):
+        _registry(tmp_path).verify()
+
+    registry = OrgRegistry(tmp_path / "other.json")
+    (tmp_path / "other.json").write_text(
+        json.dumps({"orgs": [{"org_id": "UPPER INVALID"}]}),
+        encoding="utf-8",
+    )
+    with pytest.raises(OrgRegistryError):
+        registry.verify()
+
+
+def test_verify_rejects_directory_at_store_path(tmp_path: Path) -> None:
+    store_dir = tmp_path / "orgs.json"
+    store_dir.mkdir()
+    with pytest.raises(OrgRegistryError):
+        OrgRegistry(store_dir)
+
+
+def test_readyz_reports_degraded_when_org_store_breaks(tmp_path: Path) -> None:
+    registry = _registry(tmp_path)
+    client = TestClient(
+        create_app(api_token="admintoken", org_registry=registry)
+    )
+    assert client.get("/readyz").status_code == 200
+
+    registry.store_path.write_text("{corrupt", encoding="utf-8")
+    resp = client.get("/readyz")
+    assert resp.status_code == 503
+    assert resp.json()["detail"] == "org_store_unreadable"

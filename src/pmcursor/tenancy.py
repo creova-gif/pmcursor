@@ -27,7 +27,7 @@ import threading
 from datetime import UTC, datetime
 from pathlib import Path
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 ORG_KEY_PREFIX = "pmk"
 _KEY_ID_ALPHABET = "0123456789abcdef"
@@ -99,22 +99,44 @@ class OrgRegistry:
     def store_path(self) -> Path:
         return self._store_path
 
-    def _load(self) -> None:
-        with self._lock:
-            if not self._store_path.is_file():
-                self._orgs = {}
-                return
-            try:
-                data = json.loads(self._store_path.read_text(encoding="utf-8"))
-            except (OSError, json.JSONDecodeError) as exc:
-                raise OrgRegistryError(
-                    f"org store {self._store_path} is unreadable: {exc}"
-                ) from exc
-            orgs_obj = data.get("orgs") if isinstance(data, dict) else None
-            self._orgs = {}
+    def _read_orgs(self) -> dict[str, Org]:
+        if not self._store_path.exists():
+            return {}
+        if not self._store_path.is_file():
+            raise OrgRegistryError(
+                f"org store {self._store_path} is not a regular file"
+            )
+        try:
+            data = json.loads(self._store_path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError) as exc:
+            raise OrgRegistryError(
+                f"org store {self._store_path} is unreadable: {exc}"
+            ) from exc
+        orgs_obj = data.get("orgs") if isinstance(data, dict) else None
+        orgs: dict[str, Org] = {}
+        try:
             for item in orgs_obj or []:
                 org = Org.model_validate(item)
-                self._orgs[org.org_id] = org
+                orgs[org.org_id] = org
+        except ValidationError as exc:
+            raise OrgRegistryError(
+                f"org store {self._store_path} is invalid: {exc}"
+            ) from exc
+        return orgs
+
+    def _load(self) -> None:
+        with self._lock:
+            self._orgs = self._read_orgs()
+
+    def verify(self) -> None:
+        """Probe the store for readability without mutating in-memory state.
+
+        Raises :class:`OrgRegistryError` when the file is missing its parent
+        data, unreadable, or schema-invalid. Used by the /readyz probe so a
+        node with a broken org store reports not-ready instead of failing
+        every org-key request.
+        """
+        self._read_orgs()
 
     def _save(self) -> None:
         self._store_path.parent.mkdir(parents=True, exist_ok=True)

@@ -65,6 +65,7 @@ The server exposes two unauthenticated probe endpoints for container orchestrato
   - Returns HTTP `200` with `{"status": "ok"}`.
   - Used by the image's built-in `HEALTHCHECK` (`http://127.0.0.1:8000/health`).
 - **Readiness (`GET /readyz`)**
+  - When `PMCURSOR_ORG_STORE` is configured, readiness also probes the store file and returns `503 {"detail": "org_store_unreadable"}` while it is unreadable or schema-invalid — a node with a broken registry reports not-ready instead of silently failing org-key requests.**
   - Returns HTTP `200` with `{"status": "ready", "cached_repos": <int>}`.
   - Indicates the application is ready to serve traffic and reports the number of cached repository indexes.
 - **Cache Clear (`POST /v1/cache/clear`)**
