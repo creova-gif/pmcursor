@@ -20,3 +20,6 @@ venv/
 
 # Local tool scratch
 .gstack/
+
+# Verification skill scratch + evidence (see .cursor/skills/verify-pmcursor/)
+.pmcursor-verify/
