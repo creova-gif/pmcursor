@@ -521,8 +521,8 @@ def test_sqlite_multi_instance_writes(tmp_path: Path) -> None:
     reg_a = _sqlite_registry(tmp_path)
     reg_b = _sqlite_registry(tmp_path)
 
-    org_a, key_a = reg_a.create_org("Acme", org_id="acme")
-    org_b, key_b = reg_b.create_org("Beta", org_id="beta")
+    _, key_a = reg_a.create_org("Acme", org_id="acme")
+    _, key_b = reg_b.create_org("Beta", org_id="beta")
 
     assert reg_a.get_org("beta") is not None
     assert reg_b.get_org("acme") is not None
