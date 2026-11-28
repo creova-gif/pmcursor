@@ -11,6 +11,7 @@ dependencies = ["pydantic>=2.9"]
 
 [project.optional-dependencies]
 server = ["fastapi>=0.115", "uvicorn>=0.30"]
+llm = ["anthropic>=2.0"]
 
 [project.scripts]
 pmcursor = "pmcursor.cli:main"
@@ -30,6 +31,12 @@ testpaths = ["tests"]
 [tool.mypy]
 strict = true
 python_version = "3.11"
+
+[[tool.mypy.overrides]]
+# `anthropic` is an optional extra ([project.optional-dependencies] llm); the
+# SDK ships py.typed but is not installed in base/CI environments.
+module = "anthropic"
+ignore_missing_imports = true
 
 [tool.ruff]
 line-length = 100

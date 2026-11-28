@@ -25,6 +25,7 @@ from pmcursor.feature_flags import (
 )
 from pmcursor.federation import index_federated_repos
 from pmcursor.indexer import index_repository
+from pmcursor.llm import default_llm_client, summarize_drift_report
 from pmcursor.mcp_server import run_mcp_server
 from pmcursor.plugin_validator import validate_plugin_manifests
 from pmcursor.publisher import (
@@ -789,6 +790,33 @@ def main(argv: Sequence[str] | None = None) -> int:
             dry_run=args.dry_run,
             emit_json=args.json,
         )
+
+    if args.command == "summarize":
+        prd_path = args.prd
+        repo_path = args.repo
+        if not _require_prd_and_repo(
+            prd_path,
+            repo_path,
+            "python3 -m pmcursor.cli summarize --prd PROJECT_SPEC.md --repo .",
+        ):
+            return 2
+
+        prd_md = prd_path.read_text(encoding="utf-8")
+        repo_map = index_repository(repo_path)
+        report = check_spec_drift(
+            prd_md,
+            repo_map,
+            prd_path=prd_path.as_posix(),
+            repo_root=repo_path.resolve(),
+        )
+        llm_client = None if args.offline else default_llm_client()
+        pm_summary = summarize_drift_report(report, llm_client=llm_client)
+        if args.json:
+            print(pm_summary.model_dump_json(indent=2))
+        else:
+            print(pm_summary.narrative_markdown, end="")
+            print()
+        return 0
 
     return 2
 

@@ -6,6 +6,8 @@ All notable changes to PMCursor are documented in this file.
 
 ### Added
 
+- Added Claude-powered PM drift summaries in `src/pmcursor/llm.py` (`PMDriftSummary`, `summarize_drift_report`, `LLMClient` protocol, `AnthropicLLMClient`, `default_llm_client`) behind a new `pmcursor[llm]` extra (`anthropic>=2.0`), the `pmcursor summarize` CLI subcommand (with `--offline` and `--json`), and the `POST /v1/summarize` API endpoint. Ship recommendation, top risks, and suggested spec edits are always computed deterministically; Claude writes only the narrative and falls back to a template on any failure.
+- Added `create_app(llm_client=...)` injection so API tests and embedders can supply a stub `LLMClient`.
 - Added the FastAPI webhook server in `api/server.py` and the composite GitHub Action in `.github/actions/pmcursor-drift/action.yml`.
 - Added Linear and Jira ticket auditing in `src/pmcursor/tickets.py` with the `pmcursor ticket-sync` CLI subcommand and `pmcursor serve` to launch the API server.
 - Added the codebase-cited edge-case checklist generator in `src/pmcursor/checklists.py` with the `pmcursor checklist` CLI subcommand.
@@ -62,6 +64,10 @@ All notable changes to PMCursor are documented in this file.
 - Added `metrics_lock` synchronization for thread-safe request metrics updates in `api/server.py`.
 - Added a `2MB` webhook payload cap returning HTTP `413` on oversized webhook requests in `api/server.py`.
 - Added a server bind guard requiring `PMCURSOR_API_TOKEN` when binding to non-loopback hosts, `WEB_CONCURRENCY` worker configuration, graceful CLI handling when `pmcursor[server]` extras are not installed, and Markdown table cell escaping.
+
+### Fixed
+
+- Made `tests/test_repo_governance.py` action-version assertions version-agnostic so Dependabot action bumps no longer break the suite.
 
 ## v0.1.0 (2026-11-25)
 

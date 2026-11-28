@@ -112,6 +112,10 @@ PMCursor adapts plugin packaging and CLI conventions from [`cursor/plugins`](htt
 	```bash
 	PYTHONPATH=src python3 -m pmcursor.cli publish --provider github --target owner/repo#42 --body-file report.md --dry-run
 	```
+19. Summarize a drift audit into a PM-facing narrative — Claude-powered when `pmcursor[llm]` and `ANTHROPIC_API_KEY` are configured, deterministic template otherwise. Ship recommendation and risk lists are always computed deterministically.
+	```bash
+	PYTHONPATH=src python3 -m pmcursor.cli summarize --prd PROJECT_SPEC.md --repo .
+	```
 
 ## FastAPI Server & GitHub Action
 
@@ -119,6 +123,13 @@ Install the optional server dependencies before running `serve` or starting [api
 
 ```bash
 pip install 'pmcursor[server]'
+```
+
+Claude-powered summaries (optional; falls back to a deterministic template when absent):
+
+```bash
+pip install 'pmcursor[llm]'
+export ANTHROPIC_API_KEY=...
 ```
 
 For local container development, copy [.env.example](.env.example) to `.env` and start the server with Docker Compose:

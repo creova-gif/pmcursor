@@ -28,6 +28,7 @@ from api import (
     OrgDashboardSummary,
     PublishCommentRequest,
     ReleaseNotesRequest,
+    SummarizeRequest,
     TelemetryVerifyRequest,
     TicketAuditRequest,
     compute_pr_impact,
@@ -43,6 +44,12 @@ from pmcursor.feature_flags import (
     FlagAuditReport,
     audit_feature_flags_and_rollout,
     extract_feature_flags,
+)
+from pmcursor.llm import (
+    LLMClient,
+    PMDriftSummary,
+    default_llm_client,
+    summarize_drift_report,
 )
 from pmcursor.mcp_server import RepoIndexCache
 from pmcursor.models import DriftReport, PRImpactReport
@@ -362,10 +369,12 @@ def create_app(
     rate_limit_per_minute: int | None = None,
     trust_proxy: bool | None = None,
     cors_origins: list[str] | None = None,
+    llm_client: LLMClient | None = None,
 ) -> FastAPI:
     """Create and configure the PMCursor FastAPI application."""
     fastapi_app = FastAPI(title="PMCursor API")
     cache = repo_cache if repo_cache is not None else RepoIndexCache()
+    effective_llm_client = llm_client if llm_client is not None else default_llm_client()
     effective_rate_limit = _resolve_rate_limit(rate_limit_per_minute)
     effective_trust_proxy = (
         trust_proxy
@@ -565,6 +574,24 @@ def create_app(
             prd_path=body.prd_path,
             repo_root=repo_path,
         )
+
+    @fastapi_app.post("/v1/summarize", response_model=PMDriftSummary)
+    def summarize_endpoint(
+        body: SummarizeRequest,
+        authorization: str = Header(default="", alias="Authorization"),
+        x_pmcursor_token: str = Header(default="", alias="X-PMCursor-Token"),
+    ) -> PMDriftSummary:
+        _require_auth(api_token, authorization, x_pmcursor_token)
+        repo_path = _resolve_allowed_repo_root(body.repo_root, allowed_workspace_root)
+        repo_map = cache.get_or_index(repo_path)
+        report = check_spec_drift(
+            body.prd_markdown,
+            repo_map,
+            prd_path=body.prd_path,
+            repo_root=repo_path,
+        )
+        client = None if body.offline else effective_llm_client
+        return summarize_drift_report(report, llm_client=client)
 
     @fastapi_app.post("/v1/tickets/audit", response_model=TicketSyncReport)
     def tickets_audit(

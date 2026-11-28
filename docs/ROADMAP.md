@@ -22,7 +22,8 @@ This roadmap tracks completed engineering milestones and upcoming platform capab
 | `M14` | Multi-Repo Federation | Added `src/pmcursor/federation.py` (`merge_repo_maps`, `index_federated_repos`) and `pmcursor federate` to merge contracts across multiple repositories into a unified alias-prefixed `RepoMap`. |
 | `M15` | Feature Flag & Rollout Contract Verification | Added `src/pmcursor/feature_flags.py` (`extract_feature_flags`, `audit_feature_flags_and_rollout`, `FlagAuditReport`), `pmcursor flags`, and `POST /v1/flags/audit` to index LaunchDarkly/Statsig/Unleash/generic flags and verify PRD rollout and rollback readiness. |
 | `M16` | Bi-Directional Comment Publisher & Org Alignment Dashboard | Added `src/pmcursor/publisher.py` (`publish_github_pr_comment`, `publish_linear_comment`, `publish_jira_comment`, `PublishResult`), `pmcursor dashboard`, and `GET /v1/dashboard` (`OrgDashboardSummary`) for bi-directional comment publishing and org-wide spec/rollout alignment reporting. |
+| `M17` | Claude-Powered PM Drift Summaries | Added `src/pmcursor/llm.py` (`PMDriftSummary`, `summarize_drift_report`, `LLMClient` protocol, `AnthropicLLMClient`) behind a `pmcursor[llm]` extra, `pmcursor summarize` (with `--offline`/`--json`), and `POST /v1/summarize`. Ship recommendation and risk lists stay deterministic; Claude writes only the narrative. |
 
 ## Upcoming Milestones
 
-All planned milestones (`M1`–`M16`) are complete. Upcoming work will focus on ecosystem integrations and community requests tracked in GitHub Issues.
+Completed `M1`–`M17`. In flight: live telemetry connectors (BigQuery/Langfuse), an installable GitHub App, and a Next.js split-pane UI.

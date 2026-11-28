@@ -28,6 +28,13 @@ class DriftAuditRequest(BaseModel):
     prd_path: str = "PRD.md"
 
 
+class SummarizeRequest(BaseModel):
+    prd_markdown: str
+    repo_root: str = "."
+    prd_path: str = "PRD.md"
+    offline: bool = False
+
+
 class TicketAuditRequest(BaseModel):
     ticket_id: str
     title: str

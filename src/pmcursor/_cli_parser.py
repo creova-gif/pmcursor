@@ -554,4 +554,33 @@ def build_parser() -> argparse.ArgumentParser:
         help="Emit JSON PublishResult",
     )
 
+    summarize_parser = subparsers.add_parser(
+        "summarize",
+        help="Summarize a PRD drift audit into a PM-facing narrative (Claude when configured, deterministic otherwise).",
+        epilog="Examples:\n  python3 -m pmcursor.cli summarize --prd PROJECT_SPEC.md --repo .\n  python3 -m pmcursor.cli summarize --prd PROJECT_SPEC.md --repo . --offline --json",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
+    summarize_parser.add_argument(
+        "--prd",
+        type=Path,
+        required=True,
+        help="Path to the PRD or markdown specification file",
+    )
+    summarize_parser.add_argument(
+        "--repo",
+        type=Path,
+        default=Path("."),
+        help="Repository root directory (default: .)",
+    )
+    summarize_parser.add_argument(
+        "--offline",
+        action="store_true",
+        help="Force the deterministic template summary even when Claude is configured",
+    )
+    summarize_parser.add_argument(
+        "--json",
+        action="store_true",
+        help="Emit JSON PMDriftSummary",
+    )
+
     return parser
