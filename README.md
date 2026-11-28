@@ -119,6 +119,10 @@ PMCursor adapts plugin packaging and CLI conventions from [`cursor/plugins`](htt
 	PYTHONPATH=src python3 -m pmcursor.cli github-app convert --code <redirect-code>
 	PYTHONPATH=src python3 -m pmcursor.cli github-app token --installation-id 12345
 	```
+19. Launch the interactive Next.js split-pane UI in `ui/` (Living PRD + repository contracts over the FastAPI backend; see `ui/README.md`).
+	```bash
+	cd ui && npm install && PMCURSOR_API_URL=http://localhost:8000 npm run dev
+	```
 18. Publish a drift report or comment to GitHub PRs, Linear issues, or Jira issues (supports `--dry-run`).
 	```bash
 	PYTHONPATH=src python3 -m pmcursor.cli publish --provider github --target owner/repo#42 --body-file report.md --dry-run
@@ -177,6 +181,7 @@ docker compose up --build
 - `POST /v1/release-notes`
 - `POST /v1/flags/audit`
 - `POST /v1/telemetry/verify`
+- `POST /v1/index`
 - `GET /v1/github-app/manifest`
 - `POST /v1/github-app/manifest/conversions`
 - `POST /v1/github-app/installations/{installation_id}/token`
