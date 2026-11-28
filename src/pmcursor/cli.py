@@ -39,6 +39,10 @@ from pmcursor.release_notes import (
     generate_release_notes_and_coverage,
 )
 from pmcursor.sarif import drift_report_to_sarif
+from pmcursor.telemetry_connectors import (
+    ConnectorFetchError,
+    fetch_telemetry_events,
+)
 from pmcursor.telemetry_verify import verify_telemetry_samples
 from pmcursor.tickets import audit_ticket_against_repo
 from web.canvas import render_split_pane_canvas
@@ -674,7 +678,7 @@ def main(argv: Sequence[str] | None = None) -> int:
 
     if args.command == "telemetry-verify":
         repo_path = args.repo
-        events_file: Path = args.events_file
+        events_file: Path | None = args.events_file
         if not repo_path.is_dir():
             print(
                 f"Error: Repository directory '{repo_path}' does not exist.\n"
@@ -682,7 +686,14 @@ def main(argv: Sequence[str] | None = None) -> int:
                 file=sys.stderr,
             )
             return 2
-        if not events_file.is_file():
+        if (events_file is None) == (args.source is None):
+            print(
+                "Error: Provide exactly one of --events-file or --source.\n"
+                "  Try: python3 -m pmcursor.cli telemetry-verify --repo . --source langfuse",
+                file=sys.stderr,
+            )
+            return 2
+        if events_file is not None and not events_file.is_file():
             print(
                 f"Error: Events file '{events_file}' not found.\n"
                 "  Try: python3 -m pmcursor.cli telemetry-verify --repo . --events-file events.json",
@@ -690,7 +701,18 @@ def main(argv: Sequence[str] | None = None) -> int:
             )
             return 2
         try:
-            events = _load_telemetry_events(events_file)
+            if events_file is not None:
+                events = _load_telemetry_events(events_file)
+            else:
+                events = [
+                    e.model_dump()
+                    for e in fetch_telemetry_events(
+                        args.source, limit=args.limit
+                    ).events
+                ]
+        except ConnectorFetchError as exc:
+            print(f"Error: {exc}", file=sys.stderr)
+            return 2
         except (json.JSONDecodeError, TypeError, ValueError) as exc:
             print(f"Error: Invalid telemetry events file '{events_file}': {exc}", file=sys.stderr)
             return 2

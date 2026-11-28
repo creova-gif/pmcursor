@@ -69,7 +69,9 @@ class FlagAuditRequest(BaseModel):
 
 class TelemetryVerifyRequest(BaseModel):
     repo_root: str = "."
-    events: list[dict[str, Any]]
+    events: list[dict[str, Any]] | None = None
+    source: Literal["langfuse", "bigquery"] | None = None
+    limit: int = 500
 
 
 class OrgDashboardSummary(BaseModel):

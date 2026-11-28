@@ -6,6 +6,7 @@ All notable changes to PMCursor are documented in this file.
 
 ### Added
 
+- Added live telemetry source connectors in `src/pmcursor/telemetry_connectors.py` (`TelemetryConnector` protocol, `LangfuseConnector` via the Langfuse public observations API with basic auth and pagination, `BigQueryConnector` behind a new `pmcursor[bigquery]` extra, `fetch_telemetry_events`, `ConnectorFetchError`, `TelemetryConnectorResult`). `telemetry-verify` now accepts `--source langfuse|bigquery` with `--limit` as an alternative to `--events-file`, and `POST /v1/telemetry/verify` accepts `source` + `limit` in place of `events`. Langfuse outbound URLs reuse the publisher's SSRF guard; BigQuery table/column identifiers are whitelist-validated before query construction.
 - Added Claude-powered PM drift summaries in `src/pmcursor/llm.py` (`PMDriftSummary`, `summarize_drift_report`, `LLMClient` protocol, `AnthropicLLMClient`, `default_llm_client`) behind a new `pmcursor[llm]` extra (`anthropic>=2.0`), the `pmcursor summarize` CLI subcommand (with `--offline` and `--json`), and the `POST /v1/summarize` API endpoint. Ship recommendation, top risks, and suggested spec edits are always computed deterministically; Claude writes only the narrative and falls back to a template on any failure.
 - Added `create_app(llm_client=...)` injection so API tests and embedders can supply a stub `LLMClient`.
 - Added the FastAPI webhook server in `api/server.py` and the composite GitHub Action in `.github/actions/pmcursor-drift/action.yml`.

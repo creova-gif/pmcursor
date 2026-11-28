@@ -64,6 +64,10 @@ from pmcursor.release_notes import (
     compute_scope_coverage,
     generate_release_notes_and_coverage,
 )
+from pmcursor.telemetry_connectors import (
+    ConnectorFetchError,
+    fetch_telemetry_events,
+)
 from pmcursor.telemetry_verify import (
     TelemetryVerificationReport,
     verify_telemetry_samples,
@@ -679,9 +683,22 @@ def create_app(
         x_pmcursor_token: str = Header(default="", alias="X-PMCursor-Token"),
     ) -> TelemetryVerificationReport:
         _require_auth(api_token, authorization, x_pmcursor_token)
+        if (body.events is None) == (body.source is None):
+            raise HTTPException(
+                status_code=422,
+                detail="Provide exactly one of 'events' or 'source'.",
+            )
         repo_path = _resolve_allowed_repo_root(body.repo_root, allowed_workspace_root)
         repo_map = cache.get_or_index(repo_path)
-        return verify_telemetry_samples(repo_map, body.events)
+        if body.source is not None:
+            try:
+                fetched = fetch_telemetry_events(body.source, limit=body.limit)
+            except ConnectorFetchError as exc:
+                raise HTTPException(status_code=502, detail=str(exc)) from exc
+            return verify_telemetry_samples(
+                repo_map, [e.model_dump() for e in fetched.events]
+            )
+        return verify_telemetry_samples(repo_map, body.events or [])
 
     @fastapi_app.get("/v1/dashboard", response_model=OrgDashboardSummary)
     def dashboard_endpoint(

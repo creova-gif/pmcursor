@@ -445,7 +445,12 @@ def build_parser() -> argparse.ArgumentParser:
     telemetry_parser = subparsers.add_parser(
         "telemetry-verify",
         help="Verify observed runtime telemetry samples against indexed TelemetryContract definitions.",
-        epilog="Examples:\n  python3 -m pmcursor.cli telemetry-verify --repo . --events-file events.json\n  python3 -m pmcursor.cli telemetry-verify --repo . --events-file events.ndjson --json",
+        epilog=(
+            "Examples:\n"
+            "  python3 -m pmcursor.cli telemetry-verify --repo . --events-file events.json\n"
+            "  python3 -m pmcursor.cli telemetry-verify --repo . --source langfuse --limit 200\n"
+            "  python3 -m pmcursor.cli telemetry-verify --repo . --source bigquery --json"
+        ),
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
     telemetry_parser.add_argument(
@@ -457,8 +462,20 @@ def build_parser() -> argparse.ArgumentParser:
     telemetry_parser.add_argument(
         "--events-file",
         type=Path,
-        required=True,
+        default=None,
         help="Path to a JSON array or NDJSON file of observed telemetry events",
+    )
+    telemetry_parser.add_argument(
+        "--source",
+        choices=["langfuse", "bigquery"],
+        default=None,
+        help="Fetch observed events from a live telemetry source instead of a file",
+    )
+    telemetry_parser.add_argument(
+        "--limit",
+        type=int,
+        default=500,
+        help="Maximum number of events to fetch when using --source (default: 500)",
     )
     telemetry_parser.add_argument(
         "--json",

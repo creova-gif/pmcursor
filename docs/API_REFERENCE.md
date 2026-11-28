@@ -57,7 +57,7 @@ All HTTP responses include the following headers from `request_context_middlewar
 | `POST` | `/v1/canvas` | Token | Render an interactive split-pane HTML spec canvas | `text/html` |
 | `POST` | `/v1/release-notes` | Token | Synthesize diff-grounded release notes and PRD scope coverage | `ReleaseNotesReport` (JSON) |
 | `POST` | `/v1/flags/audit` | Token | Audit PRD feature-flag declarations and rollout/rollback readiness | `FlagAuditReport` (JSON) |
-| `POST` | `/v1/telemetry/verify` | Token | Verify observed runtime telemetry samples against indexed contracts | `TelemetryVerificationReport` (JSON) |
+| `POST` | `/v1/telemetry/verify` | Token | Verify observed runtime telemetry samples against indexed contracts (body: `events` XOR `source` + `limit`) | `TelemetryVerificationReport` (JSON) |
 | `GET` | `/v1/dashboard` | Token | Compute organization alignment summary (`repo_root`, `prd_path` query params) | `OrgDashboardSummary` (JSON) |
 | `POST` | `/v1/publish` | Token | Publish a comment to a GitHub PR, Linear issue, or Jira issue | `PublishResult` (JSON) |
 | `POST` | `/v1/cache/clear` | Token | Clear all cached repository index entries | `application/json` |
