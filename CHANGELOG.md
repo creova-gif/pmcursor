@@ -4,6 +4,10 @@ All notable changes to PMCursor are documented in this file.
 
 ## [Unreleased]
 
+### Added
+
+- PyPI-ready packaging metadata in `pyproject.toml`: `readme`, SPDX `license = "MIT"`, `license-files`, author, classifiers, and project URLs; the release workflow now runs `twine check dist/*` so malformed metadata can't ship.
+
 ### Fixed
 
 - Rewrote `docs/THREAT_MODEL.md` to match the shipped tenancy controls (removed an aspirational "GCP Secret Manager" claim that described a non-existent control) and added residual-risk limits (single-process state, file-backed registry, log-based audit trail).
