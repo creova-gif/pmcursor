@@ -1,6 +1,6 @@
 {
   "name": "pmcursor",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Codebase-aware AI workflow plugin for Product Managers. Combines AST contract indexing and spec-drift verification with gstack-style office-hours, spec authoring, and ship-readiness skills.",
   "author": {
     "name": "Justin Mafie"

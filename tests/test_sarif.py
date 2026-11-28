@@ -85,7 +85,7 @@ def test_drift_report_to_sarif_with_findings() -> None:
     driver = run["tool"]["driver"]
     assert driver["name"] == "PMCursor"
     assert driver["informationUri"] == "https://github.com/creova-gif/pmcursor"
-    assert driver["version"] == "0.1.0"
+    assert driver["version"] == "0.2.0"
 
     rule_ids = [rule["id"] for rule in driver["rules"]]
     assert rule_ids == [
