@@ -310,3 +310,65 @@ def test_metrics_requires_admin_when_auth_configured(tmp_path: Path) -> None:
 def test_metrics_open_in_unauthenticated_mode() -> None:
     client = TestClient(create_app(api_token=""))
     assert client.get("/metrics").status_code == 200
+
+
+def test_audit_log_events_and_no_secret_leakage(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    import logging
+
+    registry = _registry(tmp_path)
+    client = TestClient(
+        create_app(api_token="admintoken", org_registry=registry)
+    )
+    with caplog.at_level(logging.INFO, logger="pmcursor.audit"):
+        _, api_key = registry.create_org("Acme", org_id="acme")
+        key_id = api_key.split("_")[1]
+        # auth_failure: bad token
+        assert (
+            client.post(
+                "/v1/index",
+                json={"repo_root": "."},
+                headers={"Authorization": "Bearer wrong"},
+            ).status_code
+            == 401
+        )
+        # admin_denied: org key on admin-only endpoint
+        assert (
+            client.post(
+                "/v1/cache/clear",
+                headers={"Authorization": f"Bearer {api_key}"},
+            ).status_code
+            == 403
+        )
+        registry.revoke_key(key_id)
+
+    text = caplog.text
+    for event in (
+        "event=org_created org_id=acme",
+        "event=auth_failure",
+        "event=admin_denied org_id=acme",
+        "event=org_key_revoked org_id=acme",
+    ):
+        assert event in text, event
+    # The plaintext key secret and the admin token must never reach audit logs.
+    secret = api_key.split("_", 2)[2]
+    assert secret not in text
+    assert "admintoken" not in text
+
+
+def test_audit_rate_limited_event(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    import logging
+
+    registry = _registry(tmp_path)
+    _, api_key = registry.create_org("Acme", org_id="acme")
+    client = TestClient(
+        create_app(org_registry=registry, rate_limit_per_minute=1)
+    )
+    with caplog.at_level(logging.WARNING, logger="pmcursor.audit"):
+        client.get("/v1/whoami", headers={"Authorization": f"Bearer {api_key}"})
+        client.get("/v1/whoami", headers={"Authorization": f"Bearer {api_key}"})
+    assert "event=rate_limited" in caplog.text
+    assert "bucket=org" in caplog.text

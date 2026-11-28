@@ -18,6 +18,7 @@ from __future__ import annotations
 import hashlib
 import hmac
 import json
+import logging
 import os
 import re
 import secrets
@@ -34,6 +35,9 @@ _ORG_ID_RE = re.compile(r"^[a-z0-9][a-z0-9_-]{0,62}$")
 DEFAULT_ORG_ID = "default"
 ENV_ORG_STORE = "PMCURSOR_ORG_STORE"
 DEFAULT_STORE_PATH = Path(".pmcursor") / "orgs.json"
+
+
+logger = logging.getLogger("pmcursor.audit")
 
 
 class OrgRegistryError(RuntimeError):
@@ -168,6 +172,7 @@ class OrgRegistry:
             )
             self._orgs[resolved_id] = org
             self._save()
+            logger.info("event=org_created org_id=%s key_id=%s", resolved_id, key_id)
             return org, f"{ORG_KEY_PREFIX}_{key_id}_{secret}"
 
     def issue_key(self, org_id: str, label: str = "") -> str:
@@ -186,6 +191,7 @@ class OrgRegistry:
             )
             self._orgs[org_id] = org.model_copy(update={"keys": [*org.keys, record]})
             self._save()
+            logger.info("event=org_key_issued org_id=%s key_id=%s", org_id, key_id)
             return f"{ORG_KEY_PREFIX}_{key_id}_{secret}"
 
     def revoke_key(self, key_id: str) -> bool:
@@ -201,6 +207,11 @@ class OrgRegistry:
                 if keys != list(org.keys):
                     self._orgs[org_id] = org.model_copy(update={"keys": keys})
                     self._save()
+                    logger.info(
+                        "event=org_key_revoked org_id=%s key_id=%s",
+                        org_id,
+                        key_id,
+                    )
                     return True
             return False
 
