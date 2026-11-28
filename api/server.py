@@ -241,15 +241,29 @@ def _require_admin(
 def _resolve_allowed_repo_root(
     repo_root: str,
     allowed_workspace_root: Path | None,
+    org_id: str | None = None,
+    org_registry: OrgRegistry | None = None,
 ) -> Path:
     repo_path = Path(repo_root).resolve()
     if allowed_workspace_root is not None and not repo_path.is_relative_to(
         allowed_workspace_root.resolve()
     ):
-        _audit("repo_root_denied", repo_root=repo_root)
+        _audit("repo_root_denied", repo_root=repo_path)
         raise HTTPException(
             status_code=403, detail="Repository root outside allowed workspace"
         )
+    if org_id is not None and org_registry is not None:
+        org = org_registry.get_org(org_id)
+        allowed_roots = [
+            Path(root).resolve()
+            for root in (org.workspace_roots if org is not None else [])
+        ]
+        if not any(repo_path.is_relative_to(root) for root in allowed_roots):
+            _audit("repo_root_denied", org_id=org_id, repo_root=repo_path)
+            raise HTTPException(
+                status_code=403,
+                detail="Repository root outside org workspace roots",
+            )
     if not repo_path.is_dir():
         raise HTTPException(
             status_code=404, detail="Repository directory not found"
@@ -720,7 +734,9 @@ def create_app(
         x_pmcursor_token: str = Header(default="", alias="X-PMCursor-Token"),
     ) -> RepoMap:
         org_id = _require_auth(api_token, authorization, x_pmcursor_token, org_registry)
-        repo_path = _resolve_allowed_repo_root(body.repo_root, allowed_workspace_root)
+        repo_path = _resolve_allowed_repo_root(
+            body.repo_root, allowed_workspace_root, org_id, org_registry
+        )
         return cache.get_or_index(repo_path, scope=org_id or "")
 
     @fastapi_app.post("/v1/drift/audit")
@@ -730,7 +746,9 @@ def create_app(
         x_pmcursor_token: str = Header(default="", alias="X-PMCursor-Token"),
     ) -> DriftReport:
         org_id = _require_auth(api_token, authorization, x_pmcursor_token, org_registry)
-        repo_path = _resolve_allowed_repo_root(body.repo_root, allowed_workspace_root)
+        repo_path = _resolve_allowed_repo_root(
+            body.repo_root, allowed_workspace_root, org_id, org_registry
+        )
         repo_map = cache.get_or_index(repo_path, scope=org_id or "")
         return check_spec_drift(
             body.prd_markdown,
@@ -746,7 +764,9 @@ def create_app(
         x_pmcursor_token: str = Header(default="", alias="X-PMCursor-Token"),
     ) -> PMDriftSummary:
         org_id = _require_auth(api_token, authorization, x_pmcursor_token, org_registry)
-        repo_path = _resolve_allowed_repo_root(body.repo_root, allowed_workspace_root)
+        repo_path = _resolve_allowed_repo_root(
+            body.repo_root, allowed_workspace_root, org_id, org_registry
+        )
         repo_map = cache.get_or_index(repo_path, scope=org_id or "")
         report = check_spec_drift(
             body.prd_markdown,
@@ -764,7 +784,9 @@ def create_app(
         x_pmcursor_token: str = Header(default="", alias="X-PMCursor-Token"),
     ) -> TicketSyncReport:
         org_id = _require_auth(api_token, authorization, x_pmcursor_token, org_registry)
-        repo_path = _resolve_allowed_repo_root(body.repo_root, allowed_workspace_root)
+        repo_path = _resolve_allowed_repo_root(
+            body.repo_root, allowed_workspace_root, org_id, org_registry
+        )
         repo_map = cache.get_or_index(repo_path, scope=org_id or "")
         return audit_ticket_against_repo(
             body.ticket_id,
@@ -782,7 +804,9 @@ def create_app(
         x_pmcursor_token: str = Header(default="", alias="X-PMCursor-Token"),
     ) -> EdgeCaseChecklist:
         org_id = _require_auth(api_token, authorization, x_pmcursor_token, org_registry)
-        repo_path = _resolve_allowed_repo_root(body.repo_root, allowed_workspace_root)
+        repo_path = _resolve_allowed_repo_root(
+            body.repo_root, allowed_workspace_root, org_id, org_registry
+        )
         repo_map = cache.get_or_index(repo_path, scope=org_id or "")
         return generate_edge_case_checklist(
             repo_map,
@@ -797,7 +821,9 @@ def create_app(
         x_pmcursor_token: str = Header(default="", alias="X-PMCursor-Token"),
     ) -> HTMLResponse:
         org_id = _require_auth(api_token, authorization, x_pmcursor_token, org_registry)
-        repo_path = _resolve_allowed_repo_root(body.repo_root, allowed_workspace_root)
+        repo_path = _resolve_allowed_repo_root(
+            body.repo_root, allowed_workspace_root, org_id, org_registry
+        )
         repo_map = cache.get_or_index(repo_path, scope=org_id or "")
         report = check_spec_drift(
             body.prd_markdown,
@@ -815,7 +841,9 @@ def create_app(
         x_pmcursor_token: str = Header(default="", alias="X-PMCursor-Token"),
     ) -> ReleaseNotesReport:
         org_id = _require_auth(api_token, authorization, x_pmcursor_token, org_registry)
-        repo_path = _resolve_allowed_repo_root(body.repo_root, allowed_workspace_root)
+        repo_path = _resolve_allowed_repo_root(
+            body.repo_root, allowed_workspace_root, org_id, org_registry
+        )
         repo_map = cache.get_or_index(repo_path, scope=org_id or "")
         return generate_release_notes_and_coverage(
             body.prd_markdown,
@@ -832,8 +860,12 @@ def create_app(
         authorization: str = Header(default="", alias="Authorization"),
         x_pmcursor_token: str = Header(default="", alias="X-PMCursor-Token"),
     ) -> FlagAuditReport:
-        _require_auth(api_token, authorization, x_pmcursor_token, org_registry)
-        repo_path = _resolve_allowed_repo_root(payload.repo_root, allowed_workspace_root)
+        org_id = _require_auth(
+            api_token, authorization, x_pmcursor_token, org_registry
+        )
+        repo_path = _resolve_allowed_repo_root(
+            payload.repo_root, allowed_workspace_root, org_id, org_registry
+        )
         return audit_feature_flags_and_rollout(payload.prd_markdown, repo_path)
 
     @fastapi_app.post("/v1/telemetry/verify", response_model=TelemetryVerificationReport)
@@ -848,7 +880,9 @@ def create_app(
                 status_code=422,
                 detail="Provide exactly one of 'events' or 'source'.",
             )
-        repo_path = _resolve_allowed_repo_root(body.repo_root, allowed_workspace_root)
+        repo_path = _resolve_allowed_repo_root(
+            body.repo_root, allowed_workspace_root, org_id, org_registry
+        )
         repo_map = cache.get_or_index(repo_path, scope=org_id or "")
         if body.source is not None:
             try:
@@ -930,7 +964,9 @@ def create_app(
         x_pmcursor_token: str = Header(default="", alias="X-PMCursor-Token"),
     ) -> OrgDashboardSummary:
         org_id = _require_auth(api_token, authorization, x_pmcursor_token, org_registry)
-        repo_path = _resolve_allowed_repo_root(repo_root, allowed_workspace_root)
+        repo_path = _resolve_allowed_repo_root(
+            repo_root, allowed_workspace_root, org_id, org_registry
+        )
         prd_file = (repo_path / prd_path).resolve()
         prd_markdown = (
             prd_file.read_text(encoding="utf-8")

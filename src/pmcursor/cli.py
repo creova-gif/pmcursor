@@ -945,7 +945,10 @@ def main(argv: Sequence[str] | None = None) -> int:
                 else:
                     for o in orgs:
                         active = sum(1 for k in o.keys if not k.revoked)
-                        print(f"{o.org_id}\t{o.name}\t{active} active key(s)")
+                        print(
+                            f"{o.org_id}\t{o.name}\t{active} active key(s)"
+                            f"\t{len(o.workspace_roots)} root(s)"
+                        )
                     if not orgs:
                         print("(no organizations)")
                 return 0
@@ -966,6 +969,26 @@ def main(argv: Sequence[str] | None = None) -> int:
                     )
                 else:
                     print(f"API key for {args.org_id} (shown once): {api_key}")
+                return 0
+            if args.action in {"add-root", "remove-root"}:
+                if not args.org_id or not args.root:
+                    print(
+                        "Error: --org-id and --root are required for the "
+                        f"{args.action} action.",
+                        file=sys.stderr,
+                    )
+                    return 2
+                if args.action == "add-root":
+                    org = registry.add_workspace_root(args.org_id, args.root)
+                else:
+                    org = registry.remove_workspace_root(args.org_id, args.root)
+                if args.json:
+                    print(json.dumps(org.model_dump(mode="json"), indent=2))
+                else:
+                    print(
+                        f"{args.action} {args.org_id}: roots now "
+                        f"{org.workspace_roots}"
+                    )
                 return 0
             if args.action == "revoke-key":
                 if not args.key_id:

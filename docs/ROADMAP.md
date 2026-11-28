@@ -34,5 +34,6 @@ This roadmap tracks completed engineering milestones and upcoming platform capab
 | `M24` | Per-Tenant Isolation | Admin-gated deployment endpoints (`_require_admin` → `403` for org keys on `/v1/cache/clear` and `/v1/github-app/*`), org-scoped rate-limit buckets (`org:<org_id>` vs `ip:` fallback via `resolve_key(record_use=False)` peek), and an org-namespaced `RepoIndexCache` (`(scope, path)` keys, `clear(scope)`). ADR-007. |
 | `M25` | Ops & Repo Hardening | `/metrics` gated to admin (cross-tenant counter leak fix), `.env.example` full env surface, compose org-store volume + `/orgs` image dir, Dependabot `npm`/`docker`, CI `docker` build job, SECURITY.md 0.2.x + new controls. ADR-008. |
 | `M26` | Security Audit Logging | Dedicated `pmcursor.audit` logger at every security-decision point: `auth_failure`, `admin_denied`, `repo_root_denied`, `rate_limited`, `webhook_signature_invalid`, `org_*` lifecycle. Credential-free fields enforced by test. ADR-009. |
+| `M27` | Per-Org Workspace Roots | `Org.workspace_roots` + `orgs add-root|remove-root`: org keys reach only admin-granted repo roots (empty = deny all), layered under global workspace containment. `repo_root_denied` audit events. ADR-010. |
 
-Completed `M1`–`M26`. In flight: the billing/accounts layer and per-tenant workspace scoping.
+Completed `M1`–`M27`. In flight: the billing/accounts layer.

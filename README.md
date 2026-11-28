@@ -157,7 +157,7 @@ docker compose up --build
 ### Configuration
 
 - `PMCURSOR_API_TOKEN`: Bearer token for API authentication. Required when binding `serve` to a non-loopback host (anything other than `127.0.0.1`, `localhost`, or `::1`).
-- `PMCURSOR_ORG_STORE`: Path to the multi-tenant org registry JSON (default `.pmcursor/orgs.json` for the `pmcursor orgs` CLI). When set on the server, per-org API keys (`pmk_...`) authenticate alongside `PMCURSOR_API_TOKEN` and bind an `org_id` to the request — with per-tenant rate-limit buckets, an org-scoped index cache, and `403` on admin-only endpoints (`/v1/cache/clear`, `/v1/github-app/*`).
+- `PMCURSOR_ORG_STORE`: Path to the multi-tenant org registry JSON (default `.pmcursor/orgs.json` for the `pmcursor orgs` CLI). When set on the server, per-org API keys (`pmk_...`) authenticate alongside `PMCURSOR_API_TOKEN` and bind an `org_id` to the request — with per-tenant rate-limit buckets, an org-scoped index cache, and admin-registered `workspace_roots` gating which repos each org can reach, and `403` on admin-only endpoints (`/v1/cache/clear`, `/v1/github-app/*`).
 - `PMCURSOR_WEBHOOK_SECRET`: HMAC secret used to verify incoming GitHub webhook signatures.
 - `PMCURSOR_LINEAR_WEBHOOK_SECRET`: HMAC-SHA256 secret used to verify incoming Linear webhook signatures (`Linear-Signature`).
 - `PMCURSOR_JIRA_WEBHOOK_SECRET`: HMAC-SHA256 secret used to verify incoming Jira webhook signatures (`X-Hub-Signature`); falls back to Bearer `PMCURSOR_API_TOKEN` when unset.

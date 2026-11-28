@@ -677,9 +677,10 @@ def build_parser() -> argparse.ArgumentParser:
     )
     orgs_parser.add_argument(
         "action",
-        choices=["create", "list", "issue-key", "revoke-key"],
+        choices=["create", "list", "issue-key", "revoke-key", "add-root", "remove-root"],
         help="create: register an org and print its first key; list: show orgs; "
-        "issue-key: mint an additional key; revoke-key: revoke a key by id",
+        "issue-key: mint an additional key; revoke-key: revoke a key by id; "
+        "add-root/remove-root: manage org workspace roots (per-tenant repo access)",
     )
     orgs_parser.add_argument(
         "--store",
@@ -701,6 +702,11 @@ def build_parser() -> argparse.ArgumentParser:
         "--key-id",
         default="",
         help="Key id to revoke (revoke-key action)",
+    )
+    orgs_parser.add_argument(
+        "--root",
+        default="",
+        help="Repo-root path to grant or revoke (add-root/remove-root actions)",
     )
     orgs_parser.add_argument(
         "--label",

@@ -6,6 +6,7 @@ All notable changes to PMCursor are documented in this file.
 
 ### Added
 
+- Added per-org workspace roots (ADR-010): org keys can only reach repositories under admin-registered `workspace_roots` (`pmcursor orgs add-root|remove-root`, audit-logged). **Tightening:** org keys with no registered roots now get 403 on repo-touching endpoints — previously any valid org key reached the full deployment workspace. Admin tokens, open mode, and webhook paths are unchanged.
 - Added a security audit trail on the dedicated `pmcursor.audit` logger (ADR-009): structured `event=` lines for auth failures, admin denials, workspace containment rejections, rate-limit 429s, invalid webhook signatures, and org key lifecycle — with a test proving no credential material is logged.
 - Hardened deployment surfaces (ADR-008): `GET /metrics` now requires admin auth (org keys get 403 — global counters span tenants); `.env.example` documents the full env surface; docker-compose passes tenancy/GitHub-App/telemetry vars and adds a `pmcursor-orgs` volume for the org store; Dependabot covers `npm` (`ui/`) and `docker`; CI gained a `docker` job that builds and smoke-checks the image.
 - Added per-tenant isolation (ADR-007): org keys get `403` on deployment-level endpoints (`POST /v1/cache/clear`, `/v1/github-app/*`); rate limits bucket per-tenant (`org:<org_id>`) with an IP fallback; the repository index cache is namespaced per org so tenants never share cached `RepoMap`s.
