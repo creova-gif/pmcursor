@@ -1259,6 +1259,17 @@ def run_server(host: str = "127.0.0.1", port: int = 8000) -> None:
             "uvicorn is required to run the server. Install with: pip install 'pmcursor[server]'"
         ) from exc
     if workers > 1:
+        if os.environ.get("PMCURSOR_ORG_STORE", "").strip():
+            raise ValueError(
+                "Refusing to start with WEB_CONCURRENCY>1 while PMCURSOR_ORG_STORE is set: "
+                "the file-backed org registry is single-writer and worker processes would "
+                "clobber each other's updates. Run one worker per node or unset "
+                "PMCURSOR_ORG_STORE."
+            )
+        logger.warning(
+            "WEB_CONCURRENCY>1: rate limiting, index cache, and webhook deduplication are "
+            "per-process — limits and dedup apply per worker, not per deployment."
+        )
         uvicorn_module.run("api.server:app", host=host, port=port, workers=workers)
     else:
         uvicorn_module.run(app, host=host, port=port)
