@@ -910,3 +910,51 @@ def test_webhook_passes_comment_flag(
     )
     assert resp.status_code == 200
     assert recorded_kwargs[0]["post_failure_comment"] is False
+
+
+def test_check_run_rerequest_fork_pr_uses_check_suite(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _install_fake_jwt(monkeypatch)
+    fake = _fake_with_prd(_PRD)
+    monkeypatch.setattr(urllib.request, "urlopen", fake)
+    payload = _rerequest_payload()
+    payload["check_run"]["pull_requests"] = []
+    payload["check_run"]["check_suite"] = {
+        "before": "def456abc",
+        "after": "abc123def",
+    }
+    result = run_pull_request_automation(payload, client=_client())
+    assert result is not None
+    assert result.status == "completed"
+    assert result.pr_number == 0
+    assert len(fake.check_runs) == 1
+    assert "/compare/def456abc...abc123def" in "\n".join(fake.urls)
+
+
+def test_check_run_rerequest_no_context_returns_none(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _install_fake_jwt(monkeypatch)
+    fake = _fake_with_prd(_PRD)
+    monkeypatch.setattr(urllib.request, "urlopen", fake)
+    payload = _rerequest_payload()
+    payload["check_run"]["pull_requests"] = []
+    result = run_pull_request_automation(payload, client=_client())
+    assert result is None
+    assert fake.check_runs == []
+
+
+def test_merge_group_ref_parses_final_pr_component(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _install_fake_jwt(monkeypatch)
+    fake = _fake_with_prd(_PRD)
+    monkeypatch.setattr(urllib.request, "urlopen", fake)
+    payload = _merge_group_payload()
+    payload["merge_group"]["head_ref"] = (
+        "refs/heads/gh-readonly-queue/release/pr-42-hotfix/pr-5-abc123"
+    )
+    result = run_pull_request_automation(payload, client=_client())
+    assert result is not None
+    assert result.pr_number == 5

@@ -361,7 +361,7 @@ def check_run_conclusion(report: DriftReport) -> str:
 
 
 _COMMENT_MARKER = "<!-- pmcursor-drift -->"
-_MERGE_GROUP_PR_RE = re.compile(r"/pr-(\d+)-")
+_MERGE_GROUP_PR_RE = re.compile(r"/pr-(\d+)-[^/]+$")
 
 
 def _event_head_sha(payload: dict[str, Any]) -> str:
@@ -609,18 +609,28 @@ def process_check_run_rerequest(
             if isinstance(item, dict):
                 entry = item
                 break
-    if entry is None:
-        raise GitHubAutomationError(
-            "check_run rerequested payload has no associated pull_request"
-        )
-    base_obj = entry.get("base")
-    base_sha = base_obj.get("sha") if isinstance(base_obj, dict) else None
-    pr_number = entry.get("number")
+    pr_number: Any = None
+    base_sha: Any = None
+    if entry is not None:
+        base_obj = entry.get("base")
+        base_sha = base_obj.get("sha") if isinstance(base_obj, dict) else None
+        pr_number = entry.get("number")
+    else:
+        # Fork-based PRs legitimately ship an empty pull_requests array;
+        # check_suite.before/after still pins the audited commit range.
+        suite = cr_obj.get("check_suite")
+        if isinstance(suite, dict):
+            base_sha = suite.get("before")
+            pr_number = 0
+    if entry is None and not (isinstance(base_sha, str) and base_sha):
+        # No PR entry and no check_suite shas — nothing to rerun against.
+        # Return silently rather than posting a confusing neutral check.
+        return None
     if not (isinstance(head_sha, str) and head_sha):
         raise GitHubAutomationError("check_run payload missing head_sha")
     if not (isinstance(base_sha, str) and base_sha):
         raise GitHubAutomationError("check_run payload missing base.sha")
-    if not isinstance(pr_number, int) or pr_number <= 0:
+    if not isinstance(pr_number, int) or pr_number < 0:
         raise GitHubAutomationError("check_run payload missing PR number")
     return _run_pipeline(
         repo_name=repo_name,
