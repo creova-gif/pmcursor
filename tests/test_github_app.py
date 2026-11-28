@@ -61,7 +61,14 @@ def test_build_app_manifest_fields() -> None:
     assert manifest["default_permissions"]["pull_requests"] == "write"
     assert manifest["default_permissions"]["checks"] == "write"
     assert manifest["default_permissions"]["contents"] == "read"
-    assert manifest["default_events"] == ["pull_request", "push"]
+    assert manifest["default_permissions"]["issues"] == "write"
+    assert manifest["default_permissions"]["merge_queues"] == "read"
+    assert manifest["default_events"] == [
+        "pull_request",
+        "push",
+        "check_run",
+        "merge_group",
+    ]
 
 
 def test_build_app_manifest_requires_webhook_url() -> None:

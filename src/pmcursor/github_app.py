@@ -85,8 +85,14 @@ def build_app_manifest(
             "pull_requests": "write",
             "issues": "write",
             "checks": "write",
+            "merge_queues": "read",
         },
-        "default_events": ["pull_request", "push"],
+        "default_events": [
+            "pull_request",
+            "push",
+            "check_run",
+            "merge_group",
+        ],
     }
     if redirect_url:
         _validate_outbound_url(redirect_url)

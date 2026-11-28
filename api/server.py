@@ -58,6 +58,7 @@ from pmcursor.github_app import (
     exchange_manifest_code,
 )
 from pmcursor.github_pr_automation import (
+    DEFAULT_CHECK_RUN_NAME,
     DEFAULT_PRD_CANDIDATES,
     PR_AUTOMATION_ACTIONS,
     GitHubAutomationError,
@@ -396,6 +397,7 @@ def create_app(
     github_app: GitHubAppAuth | None = None,
     github_api_base: str | None = None,
     auto_run_pull_requests: bool | None = None,
+    pr_failure_comments: bool | None = None,
 ) -> FastAPI:
     """Create and configure the PMCursor FastAPI application."""
     fastapi_app = FastAPI(title="PMCursor API")
@@ -413,6 +415,14 @@ def create_app(
         auto_run_pull_requests
         if auto_run_pull_requests is not None
         else os.environ.get("PMCURSOR_GITHUB_APP_AUTO_RUN", "1")
+        .strip()
+        .lower()
+        not in {"0", "false", "no"}
+    )
+    effective_pr_comments = (
+        pr_failure_comments
+        if pr_failure_comments is not None
+        else os.environ.get("PMCURSOR_GITHUB_APP_PR_COMMENTS", "1")
         .strip()
         .lower()
         not in {"0", "false", "no"}
@@ -894,19 +904,35 @@ def create_app(
         if isinstance(data, dict):
             if "zen" in data:
                 return {"status": "pong", "hook_id": data.get("hook_id")}
-            if "pull_request" in data and "prd_markdown" not in data:
+            automation_events = (
+                ("pull_request" in data and "prd_markdown" not in data)
+                or "merge_group" in data
+                or "check_run" in data
+            )
+            if automation_events:
                 repo = data.get("repository")
                 repo_name = repo.get("full_name") if isinstance(repo, dict) else None
+                action = data.get("action")
                 response: dict[str, Any] = {
                     "status": "accepted",
-                    "action": data.get("action"),
+                    "action": action,
                     "pr_number": data.get("number"),
                     "repository": repo_name,
                 }
+                check_run = data.get("check_run")
+                eligible = (
+                    ("pull_request" in data and action in PR_AUTOMATION_ACTIONS)
+                    or ("merge_group" in data and action == "checks_requested")
+                    or (
+                        isinstance(check_run, dict)
+                        and action == "rerequested"
+                        and check_run.get("name") == DEFAULT_CHECK_RUN_NAME
+                    )
+                )
                 if (
-                    effective_github_app is not None
+                    eligible
+                    and effective_github_app is not None
                     and effective_pr_automation
-                    and data.get("action") in PR_AUTOMATION_ACTIONS
                     and isinstance(data.get("installation"), dict)
                 ):
                     try:
@@ -927,6 +953,7 @@ def create_app(
                             data,
                             client=pr_client,
                             prd_candidates=prd_candidates,
+                            post_failure_comment=effective_pr_comments,
                         )
                         response["automation"] = "queued"
                 return response
