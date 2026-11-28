@@ -527,7 +527,9 @@ def test_sqlite_multi_instance_writes(tmp_path: Path) -> None:
     assert reg_a.get_org("beta") is not None
     assert reg_b.get_org("acme") is not None
     reg_a.add_workspace_root("acme", str(tmp_path))
-    assert str(tmp_path.resolve()) in reg_b.get_org("acme").workspace_roots
+    acme_via_b = reg_b.get_org("acme")
+    assert acme_via_b is not None
+    assert str(tmp_path.resolve()) in acme_via_b.workspace_roots
     assert reg_b.resolve_key(key_a) == "acme"
     assert reg_a.resolve_key(key_b) == "beta"
 

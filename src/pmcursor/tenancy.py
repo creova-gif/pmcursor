@@ -625,7 +625,7 @@ class SQLiteOrgRegistry:
                     )
                 except sqlite3.Error as exc:
                     raise OrgRegistryError(f"resolve_key failed: {exc}") from exc
-            return row[0]
+            return str(row[0])
 
 
 def org_registry_for_path(
